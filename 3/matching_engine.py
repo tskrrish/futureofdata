@@ -1,6 +1,7 @@
 """
-ML-Powered Volunteer Matching Engine
+ML-Powered Volunteer Matching Engine with Proximity-Based Matching
 Uses scikit-learn models with existing volunteer data patterns
+Enhanced with travel time and public transit aware scoring
 """
 import pandas as pd
 import numpy as np
@@ -12,6 +13,7 @@ from sklearn.ensemble import RandomForestClassifier
 from typing import Dict, List, Tuple, Any, Optional
 import re
 from collections import Counter
+from proximity_matcher import ProximityMatcher
 
 class VolunteerMatchingEngine:
     def __init__(self, volunteer_data: Dict[str, Any]):
@@ -29,6 +31,9 @@ class VolunteerMatchingEngine:
         
         # Fitted models flags
         self.models_trained = False
+        
+        # Initialize proximity matcher for travel time and transit scoring
+        self.proximity_matcher = ProximityMatcher()
         
         # Volunteer types and characteristics
         self.volunteer_personas = {
@@ -227,6 +232,78 @@ class VolunteerMatchingEngine:
         match_scores.sort(key=lambda x: x['score'], reverse=True)
         
         return match_scores[:top_k]
+    
+    def find_proximity_matches(self, user_preferences: Dict[str, Any], 
+                             user_location: str = None, top_k: int = 5) -> List[Dict[str, Any]]:
+        """
+        Find volunteer matches enhanced with proximity, travel time, and transit scoring
+        
+        Args:
+            user_preferences: User preferences and interests
+            user_location: User's location (address, city, or landmark)
+            top_k: Number of top matches to return
+            
+        Returns:
+            List of enhanced matches with proximity information
+        """
+        # Get base matches using traditional algorithm
+        base_matches = self.find_matches(user_preferences, top_k * 2)  # Get more for reranking
+        
+        if not user_location:
+            # If no location provided, return original matches
+            print("ℹ️ No user location provided, returning traditional matches")
+            return base_matches[:top_k]
+        
+        print(f"🌍 Enhancing matches with proximity and transit scoring for location: {user_location}")
+        
+        # Enhance matches with proximity information
+        enhanced_matches = self.proximity_matcher.enhance_project_matches(
+            base_matches, user_location, user_preferences
+        )
+        
+        return enhanced_matches[:top_k]
+    
+    def get_location_analysis(self, user_location: str, 
+                            user_preferences: Dict[str, Any] = None) -> Dict[str, Any]:
+        """
+        Analyze location accessibility and travel options to all YMCA branches
+        
+        Args:
+            user_location: User's location
+            user_preferences: User preferences for transportation
+            
+        Returns:
+            Comprehensive location analysis with travel information
+        """
+        if not user_preferences:
+            user_preferences = {}
+        
+        print(f"🗺️ Analyzing location accessibility for: {user_location}")
+        
+        branch_analysis = {}
+        
+        for branch_name in self.proximity_matcher.branch_locations.keys():
+            proximity_info = self.proximity_matcher.calculate_proximity_score(
+                user_location, branch_name, user_preferences
+            )
+            branch_analysis[branch_name] = proximity_info
+        
+        # Sort branches by proximity score
+        sorted_branches = sorted(
+            branch_analysis.items(), 
+            key=lambda x: x[1]['score'], 
+            reverse=True
+        )
+        
+        # Get branch accessibility report
+        accessibility_report = self.proximity_matcher.get_branch_accessibility_report()
+        
+        return {
+            "user_location": user_location,
+            "branch_analysis": dict(sorted_branches),
+            "accessibility_report": accessibility_report,
+            "recommendations": self._generate_location_recommendations(sorted_branches, user_preferences)
+        }
     
     def _create_user_vector(self, preferences: Dict[str, Any]) -> Dict[str, float]:
         """Create numerical vector from user preferences"""
@@ -638,6 +715,54 @@ class VolunteerMatchingEngine:
             recommendations.append("Perfect for trying different types of volunteer work")
         elif persona == 'Newcomer':
             recommendations.append("Look for opportunities with strong volunteer support and training")
+        
+        return recommendations[:3]
+    
+    def _generate_location_recommendations(self, sorted_branches: List[Tuple], 
+                                         user_preferences: Dict[str, Any]) -> List[str]:
+        """Generate personalized location and transportation recommendations"""
+        recommendations = []
+        
+        if not sorted_branches:
+            return ["Consider exploring different YMCA branches for volunteering opportunities"]
+        
+        # Best branch recommendation
+        best_branch, best_info = sorted_branches[0]
+        recommendations.append(f"Based on your location, {best_branch} offers the best combination of accessibility and programs")
+        
+        # Travel mode recommendations
+        best_travel = best_info.get('best_option', {})
+        travel_mode = best_travel.get('mode', 'driving')
+        travel_time = best_travel.get('duration_minutes', 0)
+        
+        if travel_time < 15:
+            recommendations.append("Very convenient location with short travel time")
+        elif travel_time < 30:
+            recommendations.append(f"Reasonable {travel_time} minute {travel_mode.replace('_', ' ')} commute")
+        else:
+            recommendations.append(f"Consider the {travel_time} minute travel time when scheduling volunteer activities")
+        
+        # Transit-specific recommendations
+        transport_prefs = user_preferences.get('transportation', {})
+        has_car = transport_prefs.get('has_car', True)
+        
+        if not has_car:
+            # Find best transit-accessible branches
+            transit_branches = [
+                (name, info) for name, info in sorted_branches[:3]
+                if any(opt.get('mode') == 'transit' and opt.get('transit_score', 0) > 0.5 
+                      for opt in info.get('travel_options', []))
+            ]
+            
+            if transit_branches:
+                transit_branch = transit_branches[0][0]
+                recommendations.append(f"For public transit users, {transit_branch} has the best accessibility")
+            else:
+                recommendations.append("Consider carpooling or rideshare options for better access to volunteer opportunities")
+        
+        # Multiple good options
+        if len([b for b in sorted_branches[:3] if b[1]['score'] > 0.7]) > 1:
+            recommendations.append("You have multiple convenient YMCA locations to choose from")
         
         return recommendations[:3]
     
