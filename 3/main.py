@@ -23,7 +23,7 @@ from ai_assistant import VolunteerAIAssistant
 from matching_engine import VolunteerMatchingEngine
 from data_processor import VolunteerDataProcessor
 from database import VolunteerDatabase
-\
+
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -45,8 +45,7 @@ app.add_middleware(
 # Global instances
 ai_assistant = VolunteerAIAssistant()
 database = VolunteerDatabase()
-retention_manager = None
-retention_scheduler = None
+
 volunteer_data = None
 matching_engine = None
 
@@ -853,6 +852,9 @@ async def save_conversation_message(conversation_id: str, user_message: str,
         await database.save_message(conversation_id, 'assistant', ai_response, user_id)
     except Exception as e:
         print(f"❌ Error saving conversation: {e}")
+
+# Set up reimbursement API endpoints
+setup_reimbursement_api(app, database, reimbursement_manager)
 
 # Run the application
 if __name__ == "__main__":
