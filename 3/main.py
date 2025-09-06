@@ -2,7 +2,7 @@
 Main FastAPI application for Volunteer PathFinder AI Assistant
 Brings together AI, matching engine, and database
 """
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
@@ -21,10 +21,7 @@ from ai_assistant import VolunteerAIAssistant
 from matching_engine import VolunteerMatchingEngine
 from data_processor import VolunteerDataProcessor
 from database import VolunteerDatabase
-from salesforce_service import salesforce_service
 
-# Initialize logging
-logger = logging.getLogger(__name__)
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -82,6 +79,43 @@ class FeedbackData(BaseModel):
     rating: Optional[int] = None
     feedback_text: str = ""
     feedback_type: str = "general"
+
+class MessageTemplate(BaseModel):
+    name: str
+    description: Optional[str] = ""
+    category: str = "general"  # 'welcome', 'follow_up', 'reminder', 'thank_you', 'general'
+    subject: Optional[str] = ""
+    content: str
+    merge_fields: List[str] = []  # List of available merge fields
+    is_active: bool = True
+
+class MessageTemplateUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    category: Optional[str] = None
+    subject: Optional[str] = None
+    content: Optional[str] = None
+    merge_fields: Optional[List[str]] = None
+    is_active: Optional[bool] = None
+
+class RenderTemplateRequest(BaseModel):
+    template_id: str
+    merge_data: Dict[str, Any]
+    recipient_email: Optional[str] = None
+
+class TemplateSuggestionRequest(BaseModel):
+    situation: str
+    volunteer_info: Optional[Dict[str, Any]] = {}
+
+class TemplateCreationRequest(BaseModel):
+    purpose: str
+    category: str
+    audience: str = "volunteers"
+    tone: str = "friendly and professional"
+
+class TemplateOptimizeRequest(BaseModel):
+    content: str
+    feedback: str = ""
 
 # Initialize data on startup
 @app.on_event("startup")
@@ -166,6 +200,14 @@ async def chat_page():
         return FileResponse(file_path)
     return HTMLResponse("<h3>Chat UI not found. Create static/chat.html</h3>", status_code=404)
 
+# Serve templates UI
+@app.get("/templates", response_class=HTMLResponse)
+async def templates_page():
+    file_path = os.path.join(os.path.dirname(__file__), "static", "templates.html")
+    if os.path.exists(file_path):
+        return FileResponse(file_path)
+    return HTMLResponse("<h3>Templates UI not found.</h3>", status_code=404)
+
 class ProfileRequest(BaseModel):
     name: str
 
@@ -213,7 +255,7 @@ def _derive_preferences_from_history(history_df: pd.DataFrame) -> dict:
     return preferences
 
 @app.post("/api/profile")
-async def get_profile_analysis(req: ProfileRequest) -> JSONResponse:
+async def get_profile_analysis(req: ProfileRequest, request: Request) -> JSONResponse:
     """Analyze a volunteer's profile by their name from the Excel dataset and suggest matches."""
     if volunteer_data is None:
         raise HTTPException(status_code=503, detail="Volunteer data not loaded")
@@ -363,12 +405,28 @@ async def get_profile_analysis(req: ProfileRequest) -> JSONResponse:
         "recommendations": recs,
         "summary": "\n".join(summary_lines)
     }
-    # Save context for subsequent AI chats
+    # Apply PII redaction based on user context
+    try:
+        user_context = get_user_context_from_request(request)
+        # Apply PII masking to the profile payload
+        masked_payload = pii_engine.mask_volunteer_profile(
+            profile_payload, 
+            user_context, 
+            target_user_id=str(contact_id)
+        )
+    except Exception as e:
+        print(f"⚠️ PII redaction error: {e}")
+        # Fall back to basic public masking
+        user_context = UserContext(permission_level=ViewPermissionLevel.PUBLIC)
+        masked_payload = pii_engine.mask_data(profile_payload, user_context)
+    
+    # Save context for subsequent AI chats (use original unmasked data)
     try:
         ai_assistant.add_context("profile", profile_payload)
     except Exception:
         pass
-    return JSONResponse(content=profile_payload)
+    
+    return JSONResponse(content=masked_payload)
 
 # Main chat interface
 @app.post("/api/chat")
@@ -512,7 +570,7 @@ async def create_user(user_data: UserProfile) -> JSONResponse:
         raise HTTPException(status_code=500, detail="User creation failed")
 
 @app.get("/api/users/{user_id}")
-async def get_user(user_id: str) -> JSONResponse:
+async def get_user(user_id: str, request: Request) -> JSONResponse:
     """Get user profile"""
     
     try:
@@ -525,12 +583,28 @@ async def get_user(user_id: str) -> JSONResponse:
             # Get user matches
             matches = await database.get_user_matches(user_id)
             
-            return JSONResponse(content={
+            response_data = {
                 "user": user,
                 "preferences": preferences,
                 "matches": matches,
                 "success": True
-            })
+            }
+            
+            # Apply PII redaction based on user context
+            try:
+                user_context = get_user_context_from_request(request)
+                masked_response = pii_engine.mask_volunteer_profile(
+                    response_data, 
+                    user_context, 
+                    target_user_id=user_id
+                )
+            except Exception as e:
+                print(f"⚠️ PII redaction error: {e}")
+                # Fall back to basic public masking
+                user_context = UserContext(permission_level=ViewPermissionLevel.PUBLIC)
+                masked_response = pii_engine.mask_data(response_data, user_context)
+            
+            return JSONResponse(content=masked_response)
         else:
             raise HTTPException(status_code=404, detail="User not found")
             
@@ -699,70 +773,6 @@ async def get_resources() -> JSONResponse:
     
     return JSONResponse(content=resources)
 
-# Salesforce Integration Endpoints
-
-@app.get("/api/salesforce/status")
-async def get_salesforce_status() -> JSONResponse:
-    """Get Salesforce integration status"""
-    try:
-        status = await salesforce_service.get_sync_status()
-        return JSONResponse(content=status)
-    except Exception as e:
-        logger.error(f"Failed to get Salesforce status: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get Salesforce status")
-
-@app.post("/api/salesforce/test-connection")
-async def test_salesforce_connection() -> JSONResponse:
-    """Test Salesforce connection"""
-    try:
-        result = await salesforce_service.test_connection()
-        return JSONResponse(content=result)
-    except Exception as e:
-        logger.error(f"Salesforce connection test failed: {e}")
-        raise HTTPException(status_code=500, detail="Connection test failed")
-
-@app.post("/api/salesforce/sync")
-async def trigger_salesforce_sync() -> JSONResponse:
-    """Trigger full Salesforce sync"""
-    if not salesforce_service.is_enabled():
-        raise HTTPException(status_code=503, detail="Salesforce sync is not enabled")
-    
-    if not volunteer_data:
-        raise HTTPException(status_code=400, detail="No volunteer data available to sync")
-    
-    try:
-        result = await salesforce_service.sync_volunteer_data(volunteer_data)
-        return JSONResponse(content=result)
-    except Exception as e:
-        logger.error(f"Salesforce sync failed: {e}")
-        raise HTTPException(status_code=500, detail="Sync failed")
-
-@app.post("/api/salesforce/sync-volunteer")
-async def sync_volunteer_to_salesforce(volunteer_data: UserProfile) -> JSONResponse:
-    """Sync a single volunteer to Salesforce"""
-    if not salesforce_service.is_enabled():
-        raise HTTPException(status_code=503, detail="Salesforce sync is not enabled")
-    
-    try:
-        volunteer_dict = volunteer_data.dict(exclude_unset=True)
-        result = await salesforce_service.sync_single_volunteer(volunteer_dict)
-        return JSONResponse(content=result)
-    except Exception as e:
-        logger.error(f"Failed to sync volunteer to Salesforce: {e}")
-        raise HTTPException(status_code=500, detail="Failed to sync volunteer")
-
-@app.get("/api/salesforce/data-summary")
-async def get_salesforce_data_summary() -> JSONResponse:
-    """Get summary of data in Salesforce"""
-    if not salesforce_service.is_enabled():
-        raise HTTPException(status_code=503, detail="Salesforce sync is not enabled")
-    
-    try:
-        result = await salesforce_service.get_salesforce_data_summary()
-        return JSONResponse(content=result)
-    except Exception as e:
-        logger.error(f"Failed to get Salesforce data summary: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get data summary")
 
 # Main web interface
 @app.get("/", response_class=HTMLResponse)
@@ -802,6 +812,7 @@ async def main_interface():
           <h1>YMCA Volunteer PathFinder</h1>
           <p class=\"lead\">An AI assistant that helps you explore, understand, and navigate YMCA volunteer opportunities.</p>
           <a class=\"cta\" href=\"/chat\">Start Chat</a>
+          <a class=\"cta\" href=\"/templates\" style=\"background:#38a169;margin-left:10px\">📧 Message Templates</a>
         </section>
 
         <section class=\"section\">
