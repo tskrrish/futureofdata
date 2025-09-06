@@ -13,6 +13,9 @@ import { OverviewTab } from "./components/tabs/OverviewTab";
 import { BranchesTab } from "./components/tabs/BranchesTab";
 import { PeopleTab } from "./components/tabs/PeopleTab";
 import { PassportTab } from "./components/tabs/PassportTab";
+import { AnnouncementProvider } from "./contexts/AnnouncementContext";
+import AnnouncementBanner from "./components/announcements/AnnouncementBanner";
+import AnnouncementAdmin from "./components/announcements/AnnouncementAdmin";
 
 export default function App() {
   const [raw, setRaw] = useState(SAMPLE_DATA);
@@ -44,16 +47,19 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-neutral-50">
-      <Header onFileUpload={handleFile} onExportRaw={exportHandlers.rawCurrentView} />
-      
-      <Controls
-        branches={branches}
-        branchFilter={branchFilter}
-        onBranchChange={setBranchFilter}
-        search={search}
-        onSearchChange={setSearch}
-      />
+    <AnnouncementProvider>
+      <div className="min-h-screen bg-neutral-50">
+        <Header onFileUpload={handleFile} onExportRaw={exportHandlers.rawCurrentView} />
+        
+        <AnnouncementBanner />
+        
+        <Controls
+          branches={branches}
+          branchFilter={branchFilter}
+          onBranchChange={setBranchFilter}
+          search={search}
+          onSearchChange={setSearch}
+        />
 
       {/* KPI Cards */}
       <div className="max-w-7xl mx-auto px-4 grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -80,6 +86,7 @@ export default function App() {
             ["branches", "Branch Breakdown"],
             ["people", "People & Badges"],
             ["passport", "Belonging Passport"],
+            ["announcements", "Announcements"],
           ].map(([id, label]) => (
             <button
               key={id}
@@ -113,11 +120,14 @@ export default function App() {
         )}
 
         {tab === "passport" && <PassportTab />}
+
+        {tab === "announcements" && <AnnouncementAdmin />}
       </div>
 
-      <footer className="max-w-7xl mx-auto px-4 py-10 text-xs text-neutral-500">
-        Built for YMCA Cincinnati — Hackathon: Platform for Belonging. Upload VolunteerMatters CSV/JSON above to power the dashboard.
-      </footer>
-    </div>
+        <footer className="max-w-7xl mx-auto px-4 py-10 text-xs text-neutral-500">
+          Built for YMCA Cincinnati — Hackathon: Platform for Belonging. Upload VolunteerMatters CSV/JSON above to power the dashboard.
+        </footer>
+      </div>
+    </AnnouncementProvider>
   );
 }
