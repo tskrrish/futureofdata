@@ -1,5 +1,4 @@
-import React, { useState, useEffect } from "react";
-import { Users, Clock, UserCheck, Sparkles } from "lucide-react";
+
 
 import { SAMPLE_DATA } from "./data/sampleData";
 import { exportCSV } from "./utils/csvUtils";
@@ -15,11 +14,7 @@ import { OverviewTab } from "./components/tabs/OverviewTab";
 import { BranchesTab } from "./components/tabs/BranchesTab";
 import { PeopleTab } from "./components/tabs/PeopleTab";
 import { PassportTab } from "./components/tabs/PassportTab";
-import { FeatureFlagPanel } from "./components/admin/FeatureFlagPanel";
 
-import telemetry from "./services/telemetry";
-import metrics from "./services/metrics";
-import featureFlags from "./services/featureFlags";
 
 export default function App() {
   const [raw, setRaw] = useState(SAMPLE_DATA);
@@ -160,6 +155,7 @@ export default function App() {
             ["branches", "Branch Breakdown"],
             ["people", "People & Badges"],
             ["passport", "Belonging Passport"],
+            ["monitoring", "E2E Monitoring"],
           ].map(([id, label]) => (
             <button
               key={id}
@@ -199,6 +195,8 @@ export default function App() {
         )}
 
         {tab === "passport" && <PassportTab />}
+        
+        {tab === "monitoring" && <MonitoringTab />}
       </div>
 
       <footer className="max-w-7xl mx-auto px-4 py-10 text-xs text-neutral-500">
