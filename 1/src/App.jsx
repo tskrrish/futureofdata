@@ -14,6 +14,9 @@ import { OverviewTab } from "./components/tabs/OverviewTab";
 import { BranchesTab } from "./components/tabs/BranchesTab";
 import { PeopleTab } from "./components/tabs/PeopleTab";
 import { PassportTab } from "./components/tabs/PassportTab";
+import { AnnouncementProvider } from "./contexts/AnnouncementContext";
+import AnnouncementBanner from "./components/announcements/AnnouncementBanner";
+import AnnouncementAdmin from "./components/announcements/AnnouncementAdmin";
 
 
 export default function App() {
@@ -134,40 +137,7 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-neutral-50">
-      <Header onFileUpload={handleFile} onExportRaw={exportHandlers.rawCurrentView} />
-      
-      {/* Dashboard Management Bar */}
-      <div className="max-w-7xl mx-auto px-4 py-2">
-        <div className="flex items-center justify-between bg-white rounded-lg border p-3">
-          <div className="flex items-center space-x-4">
-            {currentDashboard && (
-              <div className="text-sm">
-                <span className="font-medium text-gray-900">{currentDashboard.title}</span>
-                <span className="text-gray-500 ml-2">
-                  ({currentDashboard.permission === 'owner' ? 'Owner' : 
-                    currentDashboard.permission === 'edit' ? 'Editor' : 'Viewer'})
-                </span>
-              </div>
-            )}
-          </div>
-          <div className="flex items-center space-x-2">
-            <button
-              onClick={() => setShowDashboardManager(true)}
-              className="flex items-center space-x-2 px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm"
-            >
-              <Save className="w-4 h-4" />
-              <span>Dashboard Manager</span>
-            </button>
-          </div>
-        </div>
-      </div>
-      
-      <Controls
-        branches={branches}
-        branchFilter={branchFilter}
 
-      />
 
       {/* KPI Cards */}
       <div className="max-w-7xl mx-auto px-4 grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -248,13 +218,5 @@ export default function App() {
 
         {tab === "passport" && <PassportTab />}
 
-      </div>
-
-      <footer className="max-w-7xl mx-auto px-4 py-10 text-xs text-neutral-500">
-        Built for YMCA Cincinnati — Hackathon: Platform for Belonging. Upload VolunteerMatters CSV/JSON above to power the dashboard.
-      </footer>
-
-
-    </div>
   );
 }
