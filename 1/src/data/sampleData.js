@@ -60,3 +60,150 @@ export const SAMPLE_DATA = [
     project: "After School Programming", category: "Education", department: "Youth Development"
   }
 ];
+
+export const CERTIFICATION_DATA = [
+  {
+    id: "cert-001",
+    volunteer: "Jane Smith",
+    branch: "Blue Ash",
+    certification: "Youth Protection Training",
+    type: "Safety",
+    expiry_date: "2025-09-15",
+    issue_date: "2023-09-15",
+    criticality: "critical",
+    status: "active",
+    renewal_required: true
+  },
+  {
+    id: "cert-002", 
+    volunteer: "Jane Smith",
+    branch: "Blue Ash",
+    certification: "CPR/AED",
+    type: "Safety",
+    expiry_date: "2025-10-20",
+    issue_date: "2023-10-20",
+    criticality: "high",
+    status: "active",
+    renewal_required: true
+  },
+  {
+    id: "cert-003",
+    volunteer: "John Doe",
+    branch: "Campbell County",
+    certification: "Food Safety Certification",
+    type: "Food Service",
+    expiry_date: "2025-09-30",
+    issue_date: "2022-09-30",
+    criticality: "critical",
+    status: "active",
+    renewal_required: true
+  },
+  {
+    id: "cert-004",
+    volunteer: "Alicia Keys",
+    branch: "Clippard",
+    certification: "Senior Fitness Instructor",
+    type: "Fitness",
+    expiry_date: "2025-11-12",
+    issue_date: "2024-11-12",
+    criticality: "medium",
+    status: "active",
+    renewal_required: true
+  },
+  {
+    id: "cert-005",
+    volunteer: "Taylor Ray",
+    branch: "Campbell County",
+    certification: "Background Check",
+    type: "Safety",
+    expiry_date: "2025-09-08",
+    issue_date: "2024-09-08",
+    criticality: "critical",
+    status: "active",
+    renewal_required: true
+  },
+  {
+    id: "cert-006",
+    volunteer: "Sam Patel",
+    branch: "Blue Ash",
+    certification: "First Aid",
+    type: "Safety",
+    expiry_date: "2025-12-01",
+    issue_date: "2024-12-01",
+    criticality: "high",
+    status: "active",
+    renewal_required: true
+  },
+  {
+    id: "cert-007",
+    volunteer: "Rita Ora",
+    branch: "Clippard",
+    certification: "Child Development Associate",
+    type: "Education",
+    expiry_date: "2026-03-15",
+    issue_date: "2021-03-15",
+    criticality: "high",
+    status: "active",
+    renewal_required: false
+  },
+  {
+    id: "cert-008",
+    volunteer: "Maria Garcia",
+    branch: "Music Resource Center",
+    certification: "Music Therapy Certification",
+    type: "Therapy",
+    expiry_date: "2025-09-22",
+    issue_date: "2023-09-22",
+    criticality: "medium",
+    status: "active",
+    renewal_required: true
+  },
+  {
+    id: "cert-009",
+    volunteer: "Bob Wilson",
+    branch: "Clippard Senior Center",
+    certification: "Senior Care Training",
+    type: "Care",
+    expiry_date: "2025-10-05",
+    issue_date: "2024-10-05",
+    criticality: "high",
+    status: "active",
+    renewal_required: true
+  },
+  {
+    id: "cert-010",
+    volunteer: "Sarah Johnson",
+    branch: "Kentucky Senior Center",
+    certification: "Transportation Safety",
+    type: "Safety",
+    expiry_date: "2025-09-12",
+    issue_date: "2024-09-12",
+    criticality: "critical",
+    status: "active",
+    renewal_required: true
+  },
+  {
+    id: "cert-011",
+    volunteer: "Mike Chen",
+    branch: "R.C. Durre YMCA",
+    certification: "Youth Program Leader",
+    type: "Leadership",
+    expiry_date: "2025-11-30",
+    issue_date: "2022-11-30",
+    criticality: "medium",
+    status: "active",
+    renewal_required: true
+  },
+  {
+    id: "cert-012",
+    volunteer: "Jane Smith",
+    branch: "Blue Ash",
+    certification: "Aquatics Safety",
+    type: "Safety",
+    expiry_date: "2025-09-25",
+    issue_date: "2024-09-25",
+    criticality: "high",
+    status: "active",
+    renewal_required: true
+  }
+];

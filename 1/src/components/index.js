@@ -6,8 +6,10 @@ export { HoursByBranchChart } from "./charts/HoursByBranchChart";
 export { MonthlyTrendChart } from "./charts/MonthlyTrendChart";
 export { ActivesByBranchChart } from "./charts/ActivesByBranchChart";
 export { MemberShareChart } from "./charts/MemberShareChart";
+export { CertificationExpiryRadarChart } from "./charts/CertificationExpiryRadarChart";
 
 export { OverviewTab } from "./tabs/OverviewTab";
 export { BranchesTab } from "./tabs/BranchesTab";
 export { PeopleTab } from "./tabs/PeopleTab";
 export { PassportTab } from "./tabs/PassportTab";
+export { CertificationRadarTab } from "./tabs/CertificationRadarTab";

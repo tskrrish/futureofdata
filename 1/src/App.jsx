@@ -1,10 +1,11 @@
 import React, { useState } from "react";
 import { Users, Clock, UserCheck, Sparkles } from "lucide-react";
 
-import { SAMPLE_DATA } from "./data/sampleData";
+import { SAMPLE_DATA, CERTIFICATION_DATA } from "./data/sampleData";
 import { exportCSV } from "./utils/csvUtils";
 import { useVolunteerData } from "./hooks/useVolunteerData";
 import { useFileUpload } from "./hooks/useFileUpload";
+import { useCertificationData } from "./hooks/useCertificationData";
 
 import { Header } from "./components/ui/Header";
 import { Controls } from "./components/ui/Controls";
@@ -13,12 +14,14 @@ import { OverviewTab } from "./components/tabs/OverviewTab";
 import { BranchesTab } from "./components/tabs/BranchesTab";
 import { PeopleTab } from "./components/tabs/PeopleTab";
 import { PassportTab } from "./components/tabs/PassportTab";
+import { CertificationRadarTab } from "./components/tabs/CertificationRadarTab";
 
 export default function App() {
   const [raw, setRaw] = useState(SAMPLE_DATA);
   const [branchFilter, setBranchFilter] = useState("All");
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState("overview");
+  const [criticalityFilter, setCriticalityFilter] = useState("all");
 
   const {
     branches,
@@ -34,6 +37,8 @@ export default function App() {
     badges
   } = useVolunteerData(raw, branchFilter, search);
 
+  const certificationData = useCertificationData(CERTIFICATION_DATA, branchFilter, criticalityFilter);
+
   const handleFile = useFileUpload(setRaw);
 
   const exportHandlers = {
@@ -41,6 +46,7 @@ export default function App() {
     activesByBranch: () => exportCSV("actives_by_branch.csv", activesByBranch),
     memberShare: () => exportCSV("member_share_by_branch.csv", memberShareByBranch),
     rawCurrentView: () => exportCSV("raw_current_view.csv", filtered),
+    certificationRadar: () => exportCSV("certification_expiry_radar.csv", certificationData.all),
   };
 
   return (
@@ -80,6 +86,7 @@ export default function App() {
             ["branches", "Branch Breakdown"],
             ["people", "People & Badges"],
             ["passport", "Belonging Passport"],
+            ["certifications", "Certification Radar"],
           ].map(([id, label]) => (
             <button
               key={id}
@@ -113,6 +120,16 @@ export default function App() {
         )}
 
         {tab === "passport" && <PassportTab />}
+
+        {tab === "certifications" && (
+          <CertificationRadarTab
+            certificationData={certificationData}
+            branches={branches}
+            criticalityFilter={criticalityFilter}
+            onCriticalityChange={setCriticalityFilter}
+            onExport={exportHandlers.certificationRadar}
+          />
+        )}
       </div>
 
       <footer className="max-w-7xl mx-auto px-4 py-10 text-xs text-neutral-500">
