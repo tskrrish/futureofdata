@@ -158,8 +158,71 @@ class VolunteerDatabase:
         );
         """
         
+        # Referral links table
+        referral_links_sql = """
+        CREATE TABLE IF NOT EXISTS referral_links (
+            id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+            user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+            referral_code VARCHAR(20) UNIQUE,
+            invite_link TEXT,
+            status VARCHAR(20) DEFAULT 'pending', -- 'pending', 'completed', 'expired'
+            conversion_count INTEGER DEFAULT 0,
+            expires_at TIMESTAMP WITH TIME ZONE,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+        """
+        
+        # Referral conversions table
+        referral_conversions_sql = """
+        CREATE TABLE IF NOT EXISTS referral_conversions (
+            id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+            referral_id UUID REFERENCES referral_links(id) ON DELETE CASCADE,
+            referrer_user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+            referred_user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+            conversion_type VARCHAR(50), -- 'user_signup', 'volunteer_activity'
+            conversion_data JSONB,
+            converted_at TIMESTAMP WITH TIME ZONE,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+        """
+        
+        # Referral activities table
+        referral_activities_sql = """
+        CREATE TABLE IF NOT EXISTS referral_activities (
+            id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+            conversion_id UUID REFERENCES referral_conversions(id) ON DELETE CASCADE,
+            referred_user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+            activity_type VARCHAR(50), -- 'volunteer_activity', 'program_signup'
+            activity_data JSONB,
+            activity_date TIMESTAMP WITH TIME ZONE,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+        """
+        
+        # Referral rewards table
+        referral_rewards_sql = """
+        CREATE TABLE IF NOT EXISTS referral_rewards (
+            id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+            user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+            referral_id UUID REFERENCES referral_links(id) ON DELETE CASCADE,
+            reward_type VARCHAR(50), -- 'volunteer_hours', 'membership_discount', 'recognition_badge', 'gift_card'
+            reward_title VARCHAR(200),
+            reward_description TEXT,
+            reward_value DECIMAL(10,2),
+            status VARCHAR(20) DEFAULT 'awarded', -- 'awarded', 'redeemed', 'expired'
+            awarded_at TIMESTAMP WITH TIME ZONE,
+            redeemed_at TIMESTAMP WITH TIME ZONE,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+        """
+        
         # Execute table creation (Note: In production, use proper migrations)
-        tables = [users_sql, preferences_sql, conversations_sql, messages_sql, matches_sql, feedback_sql, analytics_sql]
+        tables = [
+            users_sql, preferences_sql, conversations_sql, messages_sql, matches_sql, 
+            feedback_sql, analytics_sql, referral_links_sql, referral_conversions_sql, 
+            referral_activities_sql, referral_rewards_sql
+        ]
         
         print("🗄️  Setting up database tables...")
         for sql in tables:

@@ -20,6 +20,7 @@ from ai_assistant import VolunteerAIAssistant
 from matching_engine import VolunteerMatchingEngine
 from data_processor import VolunteerDataProcessor
 from database import VolunteerDatabase
+from referral_system import ReferralSystem
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -41,6 +42,7 @@ app.add_middleware(
 # Global instances
 ai_assistant = VolunteerAIAssistant()
 database = VolunteerDatabase()
+referral_system = None
 volunteer_data = None
 matching_engine = None
 
@@ -78,11 +80,18 @@ class FeedbackData(BaseModel):
     feedback_text: str = ""
     feedback_type: str = "general"
 
+class ReferralCreate(BaseModel):
+    expires_in_days: Optional[int] = 30
+
+class ReferralSignup(BaseModel):
+    referral_code: str
+    user_data: UserProfile
+
 # Initialize data on startup
 @app.on_event("startup")
 async def startup_event():
     """Initialize application data and models"""
-    global volunteer_data, matching_engine
+    global volunteer_data, matching_engine, referral_system
     
     print("🚀 Starting Volunteer PathFinder AI Assistant...")
     
@@ -92,6 +101,13 @@ async def startup_event():
         print("✅ Database initialized")
     except Exception as e:
         print(f"⚠️  Database initialization note: {e}")
+    
+    # Initialize referral system
+    try:
+        referral_system = ReferralSystem(database)
+        print("✅ Referral system initialized")
+    except Exception as e:
+        print(f"❌ Error initializing referral system: {e}")
     
     # Load and process volunteer data
     try:
@@ -632,6 +648,206 @@ async def get_analytics(days: int = 30) -> JSONResponse:
     except Exception as e:
         print(f"❌ Analytics error: {e}")
         raise HTTPException(status_code=500, detail="Analytics not available")
+
+# Referral System Endpoints
+@app.post("/api/referrals/create")
+async def create_referral_link(
+    referral_data: ReferralCreate,
+    user_id: str,
+    background_tasks: BackgroundTasks
+) -> JSONResponse:
+    """Create a new referral link for a user"""
+    
+    if not referral_system:
+        raise HTTPException(status_code=503, detail="Referral system not available")
+    
+    try:
+        referral_link = await referral_system.create_referral_link(
+            user_id, 
+            referral_data.expires_in_days
+        )
+        
+        if referral_link:
+            # Track referral link creation
+            background_tasks.add_task(
+                database.track_event,
+                "referral_link_created",
+                {"expires_in_days": referral_data.expires_in_days},
+                user_id
+            )
+            
+            return JSONResponse(content={
+                "referral_link": referral_link,
+                "success": True
+            })
+        else:
+            raise HTTPException(status_code=400, detail="Failed to create referral link")
+            
+    except Exception as e:
+        print(f"❌ Referral creation error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create referral link")
+
+@app.get("/api/referrals/validate/{referral_code}")
+async def validate_referral_code(referral_code: str) -> JSONResponse:
+    """Validate a referral code"""
+    
+    if not referral_system:
+        raise HTTPException(status_code=503, detail="Referral system not available")
+    
+    try:
+        referral = await referral_system.validate_referral_code(referral_code)
+        
+        if referral:
+            return JSONResponse(content={
+                "valid": True,
+                "referral": referral,
+                "success": True
+            })
+        else:
+            return JSONResponse(content={
+                "valid": False,
+                "message": "Invalid or expired referral code",
+                "success": False
+            })
+            
+    except Exception as e:
+        print(f"❌ Referral validation error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to validate referral code")
+
+@app.post("/api/referrals/signup")
+async def referral_signup(
+    signup_data: ReferralSignup,
+    background_tasks: BackgroundTasks
+) -> JSONResponse:
+    """Handle user signup through referral link"""
+    
+    if not referral_system:
+        raise HTTPException(status_code=503, detail="Referral system not available")
+    
+    try:
+        # Validate referral code
+        referral = await referral_system.validate_referral_code(signup_data.referral_code)
+        if not referral:
+            raise HTTPException(status_code=400, detail="Invalid or expired referral code")
+        
+        # Create new user
+        user = await database.create_user(signup_data.user_data.dict(exclude_unset=True))
+        if not user:
+            raise HTTPException(status_code=400, detail="Failed to create user")
+        
+        # Track referral conversion
+        success = await referral_system.track_referral_conversion(
+            signup_data.referral_code,
+            user['id'],
+            {"signup_method": "referral", "referrer_id": referral['user_id']}
+        )
+        
+        if success:
+            # Track event
+            background_tasks.add_task(
+                database.track_event,
+                "referral_conversion",
+                {"referral_code": signup_data.referral_code, "new_user_id": user['id']},
+                referral['user_id']
+            )
+        
+        return JSONResponse(content={
+            "user": user,
+            "referral_tracked": success,
+            "success": True
+        })
+        
+    except Exception as e:
+        print(f"❌ Referral signup error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to process referral signup")
+
+@app.get("/api/referrals/user/{user_id}")
+async def get_user_referrals(user_id: str) -> JSONResponse:
+    """Get all referral data for a user"""
+    
+    if not referral_system:
+        raise HTTPException(status_code=503, detail="Referral system not available")
+    
+    try:
+        referrals = await referral_system.get_user_referrals(user_id)
+        
+        return JSONResponse(content={
+            "referrals": referrals,
+            "success": True
+        })
+        
+    except Exception as e:
+        print(f"❌ Get user referrals error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get user referrals")
+
+@app.post("/api/referrals/track-activity")
+async def track_volunteer_activity(
+    user_id: str,
+    activity_data: Dict[str, Any],
+    background_tasks: BackgroundTasks
+) -> JSONResponse:
+    """Track volunteer activity for referral rewards"""
+    
+    if not referral_system:
+        raise HTTPException(status_code=503, detail="Referral system not available")
+    
+    try:
+        success = await referral_system.track_volunteer_activity(user_id, activity_data)
+        
+        if success:
+            background_tasks.add_task(
+                database.track_event,
+                "referral_activity_tracked",
+                activity_data,
+                user_id
+            )
+        
+        return JSONResponse(content={
+            "activity_tracked": success,
+            "success": True
+        })
+        
+    except Exception as e:
+        print(f"❌ Track activity error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to track volunteer activity")
+
+@app.get("/api/referrals/analytics")
+async def get_referral_analytics(days: int = 30) -> JSONResponse:
+    """Get referral program analytics"""
+    
+    if not referral_system:
+        raise HTTPException(status_code=503, detail="Referral system not available")
+    
+    try:
+        analytics = await referral_system.get_referral_analytics(days)
+        
+        return JSONResponse(content=analytics)
+        
+    except Exception as e:
+        print(f"❌ Referral analytics error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get referral analytics")
+
+@app.get("/api/referrals/rewards/{user_id}")
+async def get_user_rewards(user_id: str) -> JSONResponse:
+    """Get rewards for a user"""
+    
+    if not referral_system:
+        raise HTTPException(status_code=503, detail="Referral system not available")
+    
+    try:
+        # Get user's referral data which includes rewards
+        referrals = await referral_system.get_user_referrals(user_id)
+        rewards = referrals.get('rewards', [])
+        
+        return JSONResponse(content={
+            "rewards": rewards,
+            "total_rewards": len(rewards),
+            "success": True
+        })
+        
+    except Exception as e:
+        print(f"❌ Get rewards error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get user rewards")
 
 # Resources and information
 @app.get("/api/resources")

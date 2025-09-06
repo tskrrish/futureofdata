@@ -11,3 +11,6 @@ export { OverviewTab } from "./tabs/OverviewTab";
 export { BranchesTab } from "./tabs/BranchesTab";
 export { PeopleTab } from "./tabs/PeopleTab";
 export { PassportTab } from "./tabs/PassportTab";
+export { ReferralTab } from "./tabs/ReferralTab";
+
+export { ReferralSignup } from "./ReferralSignup";
