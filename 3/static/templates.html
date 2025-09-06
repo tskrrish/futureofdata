@@ -1,0 +1,755 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YMCA Message Templates</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #f5f7fa;
+            color: #2d3748;
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        header {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            margin-bottom: 30px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        h1 {
+            color: #1a365d;
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+        }
+
+        .subtitle {
+            color: #718096;
+            font-size: 1.1rem;
+        }
+
+        .actions {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            background: #3182ce;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            transition: all 0.2s;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn:hover {
+            background: #2c5282;
+            transform: translateY(-1px);
+        }
+
+        .btn-secondary {
+            background: #718096;
+        }
+
+        .btn-secondary:hover {
+            background: #4a5568;
+        }
+
+        .btn-success {
+            background: #38a169;
+        }
+
+        .btn-success:hover {
+            background: #2f855a;
+        }
+
+        .btn-danger {
+            background: #e53e3e;
+        }
+
+        .btn-danger:hover {
+            background: #c53030;
+        }
+
+        .filter-section {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 30px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+
+        .filter-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+
+        select, input {
+            padding: 10px 15px;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.2s;
+        }
+
+        select:focus, input:focus {
+            outline: none;
+            border-color: #3182ce;
+        }
+
+        .templates-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 20px;
+        }
+
+        .template-card {
+            background: white;
+            border-radius: 12px;
+            padding: 25px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .template-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+        }
+
+        .template-header {
+            display: flex;
+            justify-content: between;
+            align-items: flex-start;
+            margin-bottom: 15px;
+        }
+
+        .template-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #1a365d;
+            margin-bottom: 8px;
+        }
+
+        .template-category {
+            background: #bee3f8;
+            color: #2a69ac;
+            padding: 4px 12px;
+            border-radius: 16px;
+            font-size: 12px;
+            font-weight: 500;
+            text-transform: uppercase;
+            margin-left: auto;
+        }
+
+        .template-description {
+            color: #718096;
+            margin-bottom: 15px;
+            font-size: 14px;
+        }
+
+        .template-subject {
+            background: #f7fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            padding: 10px;
+            margin-bottom: 15px;
+            font-family: 'Monaco', 'Consolas', monospace;
+            font-size: 13px;
+            color: #2d3748;
+        }
+
+        .template-content {
+            background: #f7fafc;
+            border: 1px solid #e2e8f0;
+            border-radius: 6px;
+            padding: 15px;
+            margin-bottom: 15px;
+            font-family: 'Monaco', 'Consolas', monospace;
+            font-size: 13px;
+            color: #2d3748;
+            max-height: 200px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+
+        .merge-fields {
+            margin-bottom: 15px;
+        }
+
+        .merge-fields h4 {
+            font-size: 12px;
+            color: #4a5568;
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            font-weight: 600;
+        }
+
+        .merge-field {
+            display: inline-block;
+            background: #fed7d7;
+            color: #c53030;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 500;
+            margin: 2px;
+            font-family: 'Monaco', 'Consolas', monospace;
+        }
+
+        .template-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+        }
+
+        .template-actions .btn {
+            padding: 8px 16px;
+            font-size: 12px;
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 12px;
+            max-width: 600px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+            margin: 5% auto;
+            padding: 30px;
+            position: relative;
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #e2e8f0;
+        }
+
+        .modal-title {
+            font-size: 1.5rem;
+            color: #1a365d;
+        }
+
+        .close {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: #718096;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #2d3748;
+        }
+
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            width: 100%;
+            padding: 12px 15px;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            font-size: 14px;
+        }
+
+        .form-group textarea {
+            min-height: 120px;
+            resize: vertical;
+            font-family: 'Monaco', 'Consolas', monospace;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: #718096;
+        }
+
+        .error {
+            background: #fed7d7;
+            color: #c53030;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .success {
+            background: #c6f6d5;
+            color: #2f855a;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #718096;
+        }
+
+        .empty-state h3 {
+            margin-bottom: 10px;
+            color: #4a5568;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 15px;
+            }
+
+            .templates-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .actions {
+                flex-direction: column;
+            }
+
+            h1 {
+                font-size: 2rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>📧 Message Templates</h1>
+            <p class="subtitle">Create and manage reusable communication templates with merge fields</p>
+        </header>
+
+        <div class="actions">
+            <button class="btn" onclick="openCreateModal()">
+                ➕ Create Template
+            </button>
+            <button class="btn btn-secondary" onclick="loadTemplates()">
+                🔄 Refresh
+            </button>
+            <button class="btn btn-success" onclick="seedDefaultTemplates()">
+                🌱 Seed Defaults
+            </button>
+        </div>
+
+        <div class="filter-section">
+            <div class="filter-grid">
+                <select id="categoryFilter" onchange="filterTemplates()">
+                    <option value="">All Categories</option>
+                    <option value="welcome">Welcome</option>
+                    <option value="follow_up">Follow-up</option>
+                    <option value="reminder">Reminder</option>
+                    <option value="thank_you">Thank You</option>
+                    <option value="general">General</option>
+                </select>
+                <input 
+                    type="text" 
+                    id="searchFilter" 
+                    placeholder="Search templates..."
+                    oninput="filterTemplates()"
+                >
+            </div>
+        </div>
+
+        <div id="message-area"></div>
+
+        <div id="loading" class="loading" style="display: none;">
+            Loading templates...
+        </div>
+
+        <div id="templates-container"></div>
+    </div>
+
+    <!-- Create/Edit Template Modal -->
+    <div id="templateModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title" id="modalTitle">Create Template</h2>
+                <button class="close" onclick="closeModal()">&times;</button>
+            </div>
+            
+            <form id="templateForm">
+                <div class="form-group">
+                    <label for="templateName">Name *</label>
+                    <input type="text" id="templateName" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="templateDescription">Description</label>
+                    <input type="text" id="templateDescription">
+                </div>
+
+                <div class="form-group">
+                    <label for="templateCategory">Category *</label>
+                    <select id="templateCategory" required>
+                        <option value="general">General</option>
+                        <option value="welcome">Welcome</option>
+                        <option value="follow_up">Follow-up</option>
+                        <option value="reminder">Reminder</option>
+                        <option value="thank_you">Thank You</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="templateSubject">Subject</label>
+                    <input type="text" id="templateSubject" placeholder="Use {{field.name}} for merge fields">
+                </div>
+
+                <div class="form-group">
+                    <label for="templateContent">Content *</label>
+                    <textarea id="templateContent" required placeholder="Use {{field.name}} for merge fields"></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="templateMergeFields">Merge Fields (comma-separated)</label>
+                    <input type="text" id="templateMergeFields" placeholder="user.first_name, user.email, org.name">
+                </div>
+
+                <div class="form-group">
+                    <label>
+                        <input type="checkbox" id="templateActive" checked>
+                        Active
+                    </label>
+                </div>
+
+                <div style="text-align: right;">
+                    <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                    <button type="submit" class="btn">Save Template</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        let allTemplates = [];
+        let currentEditingId = null;
+
+        // Load templates on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            loadTemplates();
+        });
+
+        async function loadTemplates() {
+            showLoading(true);
+            clearMessage();
+            
+            try {
+                const response = await fetch('/api/templates');
+                const data = await response.json();
+                
+                if (data.success) {
+                    allTemplates = data.templates;
+                    renderTemplates(allTemplates);
+                } else {
+                    showMessage('Failed to load templates', 'error');
+                }
+            } catch (error) {
+                showMessage('Error loading templates: ' + error.message, 'error');
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        function renderTemplates(templates) {
+            const container = document.getElementById('templates-container');
+            
+            if (templates.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <h3>No templates found</h3>
+                        <p>Create your first template or seed with defaults to get started.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = templates.map(template => `
+                <div class="template-card">
+                    <div class="template-header">
+                        <div>
+                            <div class="template-title">${escapeHtml(template.name)}</div>
+                            ${template.description ? `<div class="template-description">${escapeHtml(template.description)}</div>` : ''}
+                        </div>
+                        <div class="template-category">${template.category}</div>
+                    </div>
+
+                    ${template.subject ? `
+                        <div>
+                            <strong>Subject:</strong>
+                            <div class="template-subject">${escapeHtml(template.subject)}</div>
+                        </div>
+                    ` : ''}
+
+                    <div>
+                        <strong>Content:</strong>
+                        <div class="template-content">${escapeHtml(template.content)}</div>
+                    </div>
+
+                    ${template.merge_fields && template.merge_fields.length > 0 ? `
+                        <div class="merge-fields">
+                            <h4>Merge Fields:</h4>
+                            ${template.merge_fields.map(field => `<span class="merge-field">{{${field}}}</span>`).join('')}
+                        </div>
+                    ` : ''}
+
+                    <div class="template-actions">
+                        <button class="btn btn-success" onclick="previewTemplate('${template.id}')">👁️ Preview</button>
+                        <button class="btn btn-secondary" onclick="editTemplate('${template.id}')">✏️ Edit</button>
+                        <button class="btn btn-danger" onclick="deleteTemplate('${template.id}')">🗑️ Delete</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function filterTemplates() {
+            const categoryFilter = document.getElementById('categoryFilter').value;
+            const searchFilter = document.getElementById('searchFilter').value.toLowerCase();
+
+            let filtered = allTemplates.filter(template => {
+                const matchesCategory = !categoryFilter || template.category === categoryFilter;
+                const matchesSearch = !searchFilter || 
+                    template.name.toLowerCase().includes(searchFilter) ||
+                    template.description.toLowerCase().includes(searchFilter) ||
+                    template.content.toLowerCase().includes(searchFilter);
+                
+                return matchesCategory && matchesSearch;
+            });
+
+            renderTemplates(filtered);
+        }
+
+        function openCreateModal() {
+            currentEditingId = null;
+            document.getElementById('modalTitle').textContent = 'Create Template';
+            document.getElementById('templateForm').reset();
+            document.getElementById('templateActive').checked = true;
+            document.getElementById('templateModal').style.display = 'block';
+        }
+
+        function editTemplate(id) {
+            const template = allTemplates.find(t => t.id === id);
+            if (!template) return;
+
+            currentEditingId = id;
+            document.getElementById('modalTitle').textContent = 'Edit Template';
+            document.getElementById('templateName').value = template.name;
+            document.getElementById('templateDescription').value = template.description || '';
+            document.getElementById('templateCategory').value = template.category;
+            document.getElementById('templateSubject').value = template.subject || '';
+            document.getElementById('templateContent').value = template.content;
+            document.getElementById('templateMergeFields').value = (template.merge_fields || []).join(', ');
+            document.getElementById('templateActive').checked = template.is_active;
+            document.getElementById('templateModal').style.display = 'block';
+        }
+
+        function closeModal() {
+            document.getElementById('templateModal').style.display = 'none';
+            currentEditingId = null;
+        }
+
+        async function handleTemplateSubmit(event) {
+            event.preventDefault();
+            
+            const formData = {
+                name: document.getElementById('templateName').value,
+                description: document.getElementById('templateDescription').value,
+                category: document.getElementById('templateCategory').value,
+                subject: document.getElementById('templateSubject').value,
+                content: document.getElementById('templateContent').value,
+                merge_fields: document.getElementById('templateMergeFields').value.split(',').map(f => f.trim()).filter(f => f),
+                is_active: document.getElementById('templateActive').checked
+            };
+
+            try {
+                let response;
+                if (currentEditingId) {
+                    response = await fetch(`/api/templates/${currentEditingId}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(formData)
+                    });
+                } else {
+                    response = await fetch('/api/templates', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(formData)
+                    });
+                }
+
+                const result = await response.json();
+                
+                if (result.success) {
+                    showMessage(`Template ${currentEditingId ? 'updated' : 'created'} successfully!`, 'success');
+                    closeModal();
+                    loadTemplates();
+                } else {
+                    showMessage('Failed to save template', 'error');
+                }
+            } catch (error) {
+                showMessage('Error saving template: ' + error.message, 'error');
+            }
+        }
+
+        async function deleteTemplate(id) {
+            if (!confirm('Are you sure you want to delete this template?')) return;
+
+            try {
+                const response = await fetch(`/api/templates/${id}`, {
+                    method: 'DELETE'
+                });
+
+                const result = await response.json();
+                
+                if (result.success) {
+                    showMessage('Template deleted successfully!', 'success');
+                    loadTemplates();
+                } else {
+                    showMessage('Failed to delete template', 'error');
+                }
+            } catch (error) {
+                showMessage('Error deleting template: ' + error.message, 'error');
+            }
+        }
+
+        async function previewTemplate(id) {
+            const template = allTemplates.find(t => t.id === id);
+            if (!template) return;
+
+            // Sample merge data for preview
+            const sampleData = {
+                user: {
+                    first_name: "John",
+                    last_name: "Doe",
+                    email: "john.doe@example.com",
+                    member_branch: "Blue Ash YMCA"
+                },
+                volunteer: {
+                    total_hours: "25.5",
+                    sessions: "8",
+                    top_branch: "Blue Ash YMCA",
+                    interests: "Youth Development"
+                },
+                org: {
+                    name: "YMCA of Greater Cincinnati",
+                    contact_email: "volunteers@cincinnatiymca.org",
+                    phone: "(513) 555-YMCA"
+                },
+                system: {
+                    current_date: new Date().toLocaleDateString(),
+                    current_year: new Date().getFullYear().toString()
+                }
+            };
+
+            try {
+                const response = await fetch('/api/templates/render', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        template_id: id,
+                        merge_data: sampleData
+                    })
+                });
+
+                const result = await response.json();
+                
+                if (result.success) {
+                    const rendered = result.rendered;
+                    alert(`Preview of ${template.name}:\n\nSubject: ${rendered.subject}\n\nContent:\n${rendered.content}`);
+                } else {
+                    showMessage('Failed to render template preview', 'error');
+                }
+            } catch (error) {
+                showMessage('Error rendering preview: ' + error.message, 'error');
+            }
+        }
+
+        async function seedDefaultTemplates() {
+            if (!confirm('This will create default message templates. Continue?')) return;
+            
+            showMessage('Seeding default templates...', 'success');
+            
+            try {
+                // This would typically call a seed endpoint, but for now we'll show a message
+                showMessage('Default templates seeded! Use the Python script: python3 seed_templates.py', 'success');
+            } catch (error) {
+                showMessage('Error seeding templates: ' + error.message, 'error');
+            }
+        }
+
+        // Utility functions
+        function showLoading(show) {
+            document.getElementById('loading').style.display = show ? 'block' : 'none';
+        }
+
+        function showMessage(message, type = 'success') {
+            const messageArea = document.getElementById('message-area');
+            messageArea.innerHTML = `<div class="${type}">${message}</div>`;
+            setTimeout(() => clearMessage(), 5000);
+        }
+
+        function clearMessage() {
+            document.getElementById('message-area').innerHTML = '';
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Form submission
+        document.getElementById('templateForm').addEventListener('submit', handleTemplateSubmit);
+
+        // Close modal when clicking outside
+        window.addEventListener('click', function(event) {
+            const modal = document.getElementById('templateModal');
+            if (event.target === modal) {
+                closeModal();
+            }
+        });
+    </script>
+</body>
+</html>
