@@ -1,0 +1,21 @@
+# Byte-compiled / caches
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Envs
+venv/
+.env
+
+# OS
+.DS_Store
+
+# Secrets / config
+config.py
+
+# Data files (large/private)
+Y Volunteer Raw Data - Jan- August 2025.xlsx
+cleaned_volunteer_data.xlsx
+
+# Misc
+*.log
