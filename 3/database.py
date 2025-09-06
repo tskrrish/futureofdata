@@ -146,6 +146,37 @@ class VolunteerDatabase:
         );
         """
         
+        # Message templates table
+        message_templates_sql = """
+        CREATE TABLE IF NOT EXISTS message_templates (
+            id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+            name VARCHAR(100) NOT NULL,
+            description TEXT,
+            category VARCHAR(50), -- 'welcome', 'follow_up', 'reminder', 'thank_you', 'general'
+            subject VARCHAR(200),
+            content TEXT NOT NULL,
+            merge_fields JSONB, -- Available merge fields for this template
+            is_active BOOLEAN DEFAULT TRUE,
+            created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+        """
+        
+        # Template usage tracking table
+        template_usage_sql = """
+        CREATE TABLE IF NOT EXISTS template_usage (
+            id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+            template_id UUID REFERENCES message_templates(id) ON DELETE CASCADE,
+            user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+            recipient_email VARCHAR(255),
+            rendered_subject VARCHAR(200),
+            rendered_content TEXT,
+            merge_data JSONB, -- The actual data used for merge fields
+            sent_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+        """
+        
         # Analytics table
         analytics_sql = """
         CREATE TABLE IF NOT EXISTS analytics_events (
@@ -248,7 +279,7 @@ class VolunteerDatabase:
         """
         
         # Execute table creation (Note: In production, use proper migrations)
-        tables = [users_sql, preferences_sql, conversations_sql, messages_sql, matches_sql, feedback_sql, analytics_sql, tasks_sql, assignments_sql, deadline_events_sql, deadline_history_sql, task_notifications_sql]
+
         
         print("🗄️  Setting up database tables...")
         for sql in tables:
@@ -585,7 +616,12 @@ class VolunteerDatabase:
         except Exception as e:
             print(f"❌ Error getting popular matches: {e}")
             return []
-    
+
+                'created_at': datetime.now().isoformat(),
+                'updated_at': datetime.now().isoformat()
+            }
+            
+
     # Data Export
     async def export_volunteer_data(self) -> Dict[str, pd.DataFrame]:
         """Export all volunteer data for analysis"""
