@@ -20,11 +20,12 @@ from ai_assistant import VolunteerAIAssistant
 from matching_engine import VolunteerMatchingEngine
 from data_processor import VolunteerDataProcessor
 from database import VolunteerDatabase
+from shift_api import router as shift_router
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="YMCA Volunteer PathFinder AI Assistant",
-    description="AI-powered volunteer matching system for YMCA of Greater Cincinnati",
+    title="YMCA Volunteer PathFinder AI Assistant with Advanced Shift Scheduling",
+    description="AI-powered volunteer matching system with advanced shift scheduling for YMCA of Greater Cincinnati",
     version="1.0.0",
     docs_url="/docs" if settings.DEBUG else None
 )
@@ -37,6 +38,9 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Include routers
+app.include_router(shift_router)
 
 # Global instances
 ai_assistant = VolunteerAIAssistant()
