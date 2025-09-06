@@ -29,7 +29,13 @@
           <div style="font-weight:800;font-size:18px">YMCA Volunteer PathFinder</div>
           <div style="color:#64748b;font-size:13px">Personalized volunteer guidance</div>
         </div>
-        <div><a href="/" style="font-size:14px">Home</a></div>
+        <div style="display:flex;align-items:center;gap:12px">
+          <div id="auth-status" style="font-size:12px;color:#64748b"></div>
+          <div id="auth-actions">
+            <a href="/login" style="font-size:14px;margin-right:12px">Sign In</a>
+          </div>
+          <a href="/" style="font-size:14px">Home</a>
+        </div>
       </div>
       <div id="chat" class="chat"></div>
       <div class="inputbar">
@@ -42,8 +48,44 @@
     const chat = document.getElementById('chat');
     const input = document.getElementById('msg');
     const send = document.getElementById('send');
+    const authStatus = document.getElementById('auth-status');
+    const authActions = document.getElementById('auth-actions');
 
-    // Removed sidebar quick actions for a cleaner UI
+    // Authentication management
+    let authToken = localStorage.getItem('auth_token');
+    let currentUser = null;
+    
+    if (authToken) {
+      try {
+        currentUser = JSON.parse(localStorage.getItem('user'));
+      } catch (e) {
+        localStorage.removeItem('auth_token');
+        localStorage.removeItem('user');
+        authToken = null;
+      }
+    }
+    
+    function updateAuthUI() {
+      if (currentUser) {
+        authStatus.textContent = `Signed in as ${currentUser.first_name} ${currentUser.last_name}`;
+        authActions.innerHTML = '<button onclick="signOut()" style="background:none;border:1px solid #e5e7eb;color:#374151;font-size:12px;padding:4px 8px;border-radius:6px;cursor:pointer">Sign Out</button>';
+      } else {
+        authStatus.textContent = '';
+        authActions.innerHTML = '<a href="/login" style="font-size:14px;margin-right:12px">Sign In</a>';
+      }
+    }
+    
+    function signOut() {
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('user');
+      localStorage.removeItem('auth_provider');
+      authToken = null;
+      currentUser = null;
+      updateAuthUI();
+      addBubble('assistant', 'You have been signed out. Your conversation will continue as a guest.');
+    }
+    
+    updateAuthUI();
 
     let conversationId = null;
 
@@ -58,10 +100,21 @@
       chat.scrollTop = chat.scrollHeight;
     }
 
+    function getAuthHeaders() {
+      const headers = {'Content-Type': 'application/json'};
+      if (authToken) {
+        headers['Authorization'] = `Bearer ${authToken}`;
+      }
+      return headers;
+    }
+
     async function ensureConversation(){
       if(conversationId) return conversationId;
       try{
-        const r = await fetch('/api/conversations', {method:'POST'});
+        const r = await fetch('/api/conversations', {
+          method:'POST',
+          headers: getAuthHeaders()
+        });
         const j = await r.json();
         conversationId = j.conversation_id;
         return conversationId;
@@ -75,7 +128,8 @@
         const raw = nameMatch[2].trim();
         try{
           const pr = await fetch('/api/profile', {
-            method:'POST', headers:{'Content-Type':'application/json'},
+            method:'POST', 
+            headers: getAuthHeaders(),
             body: JSON.stringify({ name: raw })
           });
           const pj = await pr.json();
@@ -108,7 +162,7 @@
       try{
         const r = await fetch('/api/chat', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getAuthHeaders(),
           body: JSON.stringify({ message: text, conversation_id: conversationId })
         });
         const j = await r.json();
