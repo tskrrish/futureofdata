@@ -13,9 +13,7 @@ import asyncio
 from datetime import datetime
 import os
 import pandas as pd
-import uuid
-import logging
-from dataclasses import asdict
+
 
 # Import our modules
 from config import settings
@@ -23,6 +21,7 @@ from ai_assistant import VolunteerAIAssistant
 from matching_engine import VolunteerMatchingEngine
 from data_processor import VolunteerDataProcessor
 from database import VolunteerDatabase
+from auth import SSOAuth, get_current_user_optional, get_current_user_required
 
 
 # Initialize FastAPI app
@@ -149,9 +148,110 @@ async def health_check():
         "models_ready": matching_engine is not None and matching_engine.models_trained
     }
 
+# SSO Authentication Routes
+@app.get("/auth/google")
+async def google_login():
+    """Initiate Google OAuth login"""
+    auth_url = sso_auth.get_google_auth_url()
+    return {"auth_url": auth_url}
+
+@app.get("/auth/microsoft")
+async def microsoft_login():
+    """Initiate Microsoft OAuth login"""
+    auth_url = sso_auth.get_microsoft_auth_url()
+    return {"auth_url": auth_url}
+
+@app.get("/auth/callback/google")
+async def google_callback(request: Request):
+    """Handle Google OAuth callback"""
+    try:
+        result = await sso_auth.handle_google_callback(request)
+        # Return HTML page that handles the token storage and redirect
+        return HTMLResponse(f"""
+        <!doctype html>
+        <html>
+        <head><title>Authentication Complete</title></head>
+        <body>
+          <script>
+            localStorage.setItem('auth_token', '{result["access_token"]}');
+            localStorage.setItem('user', '{json.dumps(result["user"])}');
+            localStorage.setItem('auth_provider', '{result["provider"]}');
+            window.location.href = '/chat';
+          </script>
+        </body>
+        </html>
+        """)
+    except HTTPException as e:
+        return HTMLResponse(f"""
+        <!doctype html>
+        <html>
+        <head><title>Authentication Error</title></head>
+        <body>
+          <script>
+            alert('Authentication failed: {e.detail}');
+            window.location.href = '/login';
+          </script>
+        </body>
+        </html>
+        """, status_code=e.status_code)
+
+@app.get("/auth/callback/microsoft")
+async def microsoft_callback(request: Request):
+    """Handle Microsoft OAuth callback"""
+    try:
+        result = await sso_auth.handle_microsoft_callback(request)
+        # Return HTML page that handles the token storage and redirect
+        return HTMLResponse(f"""
+        <!doctype html>
+        <html>
+        <head><title>Authentication Complete</title></head>
+        <body>
+          <script>
+            localStorage.setItem('auth_token', '{result["access_token"]}');
+            localStorage.setItem('user', '{json.dumps(result["user"])}');
+            localStorage.setItem('auth_provider', '{result["provider"]}');
+            window.location.href = '/chat';
+          </script>
+        </body>
+        </html>
+        """)
+    except HTTPException as e:
+        return HTMLResponse(f"""
+        <!doctype html>
+        <html>
+        <head><title>Authentication Error</title></head>
+        <body>
+          <script>
+            alert('Authentication failed: {e.detail}');
+            window.location.href = '/login';
+          </script>
+        </body>
+        </html>
+        """, status_code=e.status_code)
+
+@app.get("/auth/me")
+async def get_current_user_info(user = Depends(lambda: get_current_user_optional(database))):
+    """Get current user information"""
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return {"user": user}
+
+@app.post("/auth/logout")
+async def logout():
+    """Logout endpoint (client-side token removal)"""
+    return {"message": "Logged out successfully", "note": "Remove token from client storage"}
+
 # Serve static files (for web interface)
 if os.path.exists("static"):
     app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# Serve login page
+@app.get("/login", response_class=HTMLResponse)
+async def login_page():
+    file_path = os.path.join(os.path.dirname(__file__), "static", "login.html")
+    if os.path.exists(file_path):
+        return FileResponse(file_path)
+    return HTMLResponse("<h3>Login page not found</h3>", status_code=404)
 
 # Serve chat UI directly
 @app.get("/chat", response_class=HTMLResponse)
@@ -393,7 +493,8 @@ async def get_profile_analysis(req: ProfileRequest, request: Request) -> JSONRes
 @app.post("/api/chat")
 async def chat_with_assistant(
     chat_data: ChatMessage,
-    background_tasks: BackgroundTasks
+    background_tasks: BackgroundTasks,
+    current_user = Depends(lambda: get_current_user_optional(database))
 ) -> JSONResponse:
     """Main chat endpoint for the AI assistant"""
     
@@ -404,6 +505,9 @@ async def chat_with_assistant(
             conversation_id=chat_data.conversation_id
         )
         
+        # Use current user ID if available
+        user_id = current_user['id'] if current_user else chat_data.user_id
+        
         # Save to database in background
         if chat_data.conversation_id:
             background_tasks.add_task(
@@ -411,7 +515,7 @@ async def chat_with_assistant(
                 chat_data.conversation_id,
                 chat_data.message,
                 response.get('response', ''),
-                chat_data.user_id
+                user_id
             )
         
         # Track analytics
@@ -422,7 +526,7 @@ async def chat_with_assistant(
                 "message_length": len(chat_data.message),
                 "response_success": response.get('success', False)
             },
-            chat_data.user_id,
+            user_id,
             chat_data.conversation_id
         )
         
@@ -436,8 +540,9 @@ async def chat_with_assistant(
 @app.post("/api/match")
 async def get_volunteer_matches(
     preferences: UserPreferences,
-    user_id: Optional[str] = None,
-    background_tasks: BackgroundTasks = None
+    background_tasks: BackgroundTasks,
+    current_user = Depends(lambda: get_current_user_optional(database)),
+    user_id: Optional[str] = None
 ) -> JSONResponse:
     """Get personalized volunteer recommendations"""
     
@@ -473,18 +578,21 @@ async def get_volunteer_matches(
             "generated_at": datetime.now().isoformat()
         }
         
+        # Use current user ID if available, otherwise fallback to provided user_id
+        effective_user_id = current_user['id'] if current_user else user_id
+        
         # Save matches to database
-        if user_id:
+        if effective_user_id:
             background_tasks.add_task(
                 database.save_volunteer_matches,
-                user_id,
+                effective_user_id,
                 ml_matches
             )
             
             # Save preferences
             background_tasks.add_task(
                 database.save_user_preferences,
-                user_id,
+                effective_user_id,
                 preferences_dict
             )
         
@@ -497,7 +605,7 @@ async def get_volunteer_matches(
                 "matches_count": len(ml_matches),
                 "top_match_score": ml_matches[0]['score'] if ml_matches else 0
             },
-            user_id
+            effective_user_id
         )
         
         return JSONResponse(content=result)
@@ -773,8 +881,7 @@ async def main_interface():
         <section class=\"hero\">
           <h1>YMCA Volunteer PathFinder</h1>
           <p class=\"lead\">An AI assistant that helps you explore, understand, and navigate YMCA volunteer opportunities.</p>
-          <a class=\"cta\" href=\"/chat\">Start Chat</a>
-          <a class=\"cta\" href=\"/templates\" style=\"background:#38a169;margin-left:10px\">📧 Message Templates</a>
+
         </section>
 
         <section class=\"section\">

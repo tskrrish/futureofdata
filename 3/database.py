@@ -68,6 +68,8 @@ class VolunteerDatabase:
             zip_code VARCHAR(10),
             is_ymca_member BOOLEAN DEFAULT FALSE,
             member_branch VARCHAR(100),
+            sso_provider VARCHAR(20), -- 'google', 'microsoft', null for regular
+            sso_id VARCHAR(255), -- SSO provider user ID
             created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
             updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
         );
