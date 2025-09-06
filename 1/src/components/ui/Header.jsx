@@ -1,6 +1,6 @@
-import { Download } from "lucide-react";
+import { Download, Monitor } from "lucide-react";
 
-export function Header({ onFileUpload, onExportRaw }) {
+export function Header({ onFileUpload, onExportRaw, onKioskMode }) {
   return (
     <header className="sticky top-0 z-10 bg-white/80 backdrop-blur border-b">
       <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
@@ -25,6 +25,14 @@ export function Header({ onFileUpload, onExportRaw }) {
           >
             <Download className="w-4 h-4" /> Export Raw
           </button>
+          {onKioskMode && (
+            <button
+              onClick={onKioskMode}
+              className="inline-flex items-center gap-2 rounded-xl border px-3 py-1.5 text-sm bg-blue-50 text-blue-700 border-blue-200 hover:bg-blue-100"
+            >
+              <Monitor className="w-4 h-4" /> Kiosk Mode
+            </button>
+          )}
         </div>
       </div>
     </header>

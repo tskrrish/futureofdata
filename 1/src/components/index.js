@@ -11,3 +11,9 @@ export { OverviewTab } from "./tabs/OverviewTab";
 export { BranchesTab } from "./tabs/BranchesTab";
 export { PeopleTab } from "./tabs/PeopleTab";
 export { PassportTab } from "./tabs/PassportTab";
+
+export { KioskCheckIn } from "./kiosk/KioskCheckIn";
+export { QRScanner } from "./kiosk/QRScanner";
+export { PINEntry } from "./kiosk/PINEntry";
+export { NFCReader } from "./kiosk/NFCReader";
+export { SyncManager } from "./kiosk/SyncManager";

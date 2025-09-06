@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Users, Clock, UserCheck, Sparkles } from "lucide-react";
+import { Users, Clock, UserCheck, Sparkles, Monitor } from "lucide-react";
 
 import { SAMPLE_DATA } from "./data/sampleData";
 import { exportCSV } from "./utils/csvUtils";
@@ -13,12 +13,14 @@ import { OverviewTab } from "./components/tabs/OverviewTab";
 import { BranchesTab } from "./components/tabs/BranchesTab";
 import { PeopleTab } from "./components/tabs/PeopleTab";
 import { PassportTab } from "./components/tabs/PassportTab";
+import { KioskCheckIn } from "./components/kiosk/KioskCheckIn";
 
 export default function App() {
   const [raw, setRaw] = useState(SAMPLE_DATA);
   const [branchFilter, setBranchFilter] = useState("All");
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState("overview");
+  const [kioskMode, setKioskMode] = useState(false);
 
   const {
     branches,
@@ -43,9 +45,23 @@ export default function App() {
     rawCurrentView: () => exportCSV("raw_current_view.csv", filtered),
   };
 
+  // If in kiosk mode, render only the kiosk interface
+  if (kioskMode) {
+    return (
+      <KioskCheckIn 
+        onBackToDashboard={() => setKioskMode(false)}
+        branch={branchFilter !== "All" ? branchFilter : "Main Branch"}
+      />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-neutral-50">
-      <Header onFileUpload={handleFile} onExportRaw={exportHandlers.rawCurrentView} />
+      <Header 
+        onFileUpload={handleFile} 
+        onExportRaw={exportHandlers.rawCurrentView}
+        onKioskMode={() => setKioskMode(true)}
+      />
       
       <Controls
         branches={branches}
