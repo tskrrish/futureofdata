@@ -2,6 +2,7 @@
 
 import { SAMPLE_DATA } from "./data/sampleData";
 import { exportCSV } from "./utils/csvUtils";
+import { createExportData, EXPORT_TYPES } from "./utils/vaultExportUtils";
 import { useVolunteerData } from "./hooks/useVolunteerData";
 import { useFileUpload } from "./hooks/useFileUpload";
 import { useTelemetry, usePageTracking } from "./hooks/useTelemetry";
@@ -14,9 +15,6 @@ import { OverviewTab } from "./components/tabs/OverviewTab";
 import { BranchesTab } from "./components/tabs/BranchesTab";
 import { PeopleTab } from "./components/tabs/PeopleTab";
 import { PassportTab } from "./components/tabs/PassportTab";
-import { AnnouncementProvider } from "./contexts/AnnouncementContext";
-import AnnouncementBanner from "./components/announcements/AnnouncementBanner";
-import AnnouncementAdmin from "./components/announcements/AnnouncementAdmin";
 
 
 export default function App() {
@@ -24,28 +22,7 @@ export default function App() {
   const [branchFilter, setBranchFilter] = useState("All");
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState("overview");
-  const [showDashboardManager, setShowDashboardManager] = useState(false);
-  const [currentDashboard, setCurrentDashboard] = useState(null);
 
-  // Telemetry and feature flags
-  const { trackUserAction } = useTelemetry();
-  const { isEnabled: enhancedReporting } = useFeatureFlag('enhancedReporting');
-  const { isEnabled: advancedFiltering } = useFeatureFlag('advancedFiltering');
-  const { isEnabled: exportEnhancements } = useFeatureFlag('exportEnhancements');
-  
-  usePageTracking('dashboard');
-
-  // Initialize services
-  useEffect(() => {
-    featureFlags.setUserAttributes({
-      userId: 'dashboard_user',
-      role: 'admin',
-      timestamp: new Date().toISOString()
-    });
-    
-    telemetry.setUserId('dashboard_user');
-    metrics.trackPageView('dashboard');
-  }, []);
 
   const {
     branches,
@@ -136,6 +113,36 @@ export default function App() {
     return permission === 'owner' || permission === 'edit';
   };
 
+  const vaultExportHandlers = {
+    hoursByBranch: () => exportToVault(EXPORT_TYPES.HOURS_BY_BRANCH, hoursByBranch),
+    activesByBranch: () => exportToVault(EXPORT_TYPES.ACTIVES_BY_BRANCH, activesByBranch),
+    memberShare: () => exportToVault(EXPORT_TYPES.MEMBER_SHARE, memberShareByBranch),
+    monthlyTrend: () => exportToVault(EXPORT_TYPES.MONTHLY_TREND, trendByMonth),
+    leaderboard: () => exportToVault(EXPORT_TYPES.LEADERBOARD, leaderboard),
+    rawCurrentView: () => exportToVault(EXPORT_TYPES.RAW_DATA, filtered),
+    branchAnalytics: () => exportToVault(EXPORT_TYPES.BRANCH_ANALYTICS, filtered),
+    membershipAnalysis: () => exportToVault(EXPORT_TYPES.MEMBERSHIP_ANALYSIS, filtered)
+  };
+
+  const exportToVault = async (exportType, data) => {
+    if (!vaultExportFunction) {
+      alert('Please connect to Google Drive first');
+      return;
+    }
+
+    try {
+      const exportData = createExportData(exportType, data, { branchFilter, search });
+      const result = await vaultExportFunction(exportData.data, exportData.filename, exportData.category);
+      
+      if (result.success) {
+        alert(`Successfully exported to Google Drive: ${result.fileName}`);
+      }
+    } catch (error) {
+      console.error('Export to vault failed:', error);
+      alert('Failed to export to Google Drive. Please check your connection.');
+    }
+  };
+
   return (
 
 
@@ -194,7 +201,7 @@ export default function App() {
             hoursByBranch={hoursByBranch} 
             trendByMonth={trendByMonth} 
             onExportHours={exportHandlers.hoursByBranch}
-            enhancedReporting={enhancedReporting}
+
           />
         )}
 
@@ -204,7 +211,7 @@ export default function App() {
             memberShareByBranch={memberShareByBranch}
             onExportActives={exportHandlers.activesByBranch}
             onExportMemberShare={exportHandlers.memberShare}
-            exportEnhancements={exportEnhancements}
+
           />
         )}
 
@@ -212,11 +219,12 @@ export default function App() {
           <PeopleTab 
             leaderboard={leaderboard} 
             badges={badges}
-            enhancedReporting={enhancedReporting}
+
           />
         )}
 
         {tab === "passport" && <PassportTab />}
+
 
   );
 }
