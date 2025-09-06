@@ -24,6 +24,7 @@ from ai_assistant import VolunteerAIAssistant
 from matching_engine import VolunteerMatchingEngine
 from data_processor import VolunteerDataProcessor
 from database import VolunteerDatabase
+from sync_manager import sync_manager
 
 
 # Initialize FastAPI app
@@ -81,6 +82,15 @@ class FeedbackData(BaseModel):
     feedback_text: str = ""
     feedback_type: str = "general"
 
+class SyncRequest(BaseModel):
+    table_types: List[str] = ["volunteers", "projects"]
+    scheduled_time: Optional[str] = None
+
+class ConflictResolution(BaseModel):
+    conflict_id: str
+    resolution: str  # "accept_source", "accept_target", "custom"
+    resolved_data: Optional[Dict[str, Any]] = None
+
 # Initialize data on startup
 @app.on_event("startup")
 async def startup_event():
@@ -125,6 +135,13 @@ async def startup_event():
         print("✅ Email/SMS drafting engine initialized")
     except Exception as e:
         print(f"❌ Error initializing drafting engine: {e}")
+    
+    # Initialize sync manager
+    if sync_manager.initialize():
+        await sync_manager.start_background_sync()
+        print("🔄 Airtable/Notion sync manager started")
+    else:
+        print("⚠️  Sync manager not initialized - check configuration")
     
     print("🎉 Volunteer PathFinder AI Assistant is ready!")
     
@@ -1092,6 +1109,181 @@ async def get_resources() -> JSONResponse:
             "Fitness & Wellness": "Group exercise, swimming instruction, sports coaching",
             "Special Events": "Fundraisers, community celebrations, holiday programs",
             "Facility Suppor
+
+# Airtable/Notion Sync Endpoints
+@app.get("/api/sync/status")
+async def get_sync_status() -> JSONResponse:
+    """Get current sync status and statistics"""
+    try:
+        status = await sync_manager.get_sync_status()
+        return JSONResponse(content=status)
+    except Exception as e:
+        logger.error(f"Error getting sync status: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get sync status")
+
+@app.post("/api/sync/start")
+async def start_sync(sync_request: SyncRequest) -> JSONResponse:
+    """Start a new sync process"""
+    try:
+        scheduled_time = None
+        if sync_request.scheduled_time:
+            scheduled_time = datetime.fromisoformat(sync_request.scheduled_time)
+        
+        task_id = await sync_manager.schedule_sync(
+            sync_request.table_types, 
+            scheduled_time
+        )
+        
+        return JSONResponse(content={
+            "task_id": task_id,
+            "status": "scheduled",
+            "table_types": sync_request.table_types,
+            "scheduled_time": sync_request.scheduled_time
+        })
+    except Exception as e:
+        logger.error(f"Error starting sync: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to start sync: {str(e)}")
+
+@app.post("/api/sync/force")
+async def force_sync(sync_request: SyncRequest) -> JSONResponse:
+    """Force immediate sync bypassing queue"""
+    try:
+        task_id = await sync_manager.force_sync(sync_request.table_types)
+        
+        # Get task details
+        task_details = await sync_manager.get_task_details(task_id)
+        
+        return JSONResponse(content={
+            "task_id": task_id,
+            "status": "executed",
+            "table_types": sync_request.table_types,
+            "details": task_details
+        })
+    except Exception as e:
+        logger.error(f"Error forcing sync: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to force sync: {str(e)}")
+
+@app.get("/api/sync/task/{task_id}")
+async def get_task_details(task_id: str) -> JSONResponse:
+    """Get details for a specific sync task"""
+    try:
+        task_details = await sync_manager.get_task_details(task_id)
+        
+        if not task_details:
+            raise HTTPException(status_code=404, detail="Task not found")
+        
+        return JSONResponse(content=task_details)
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error getting task details: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get task details")
+
+@app.delete("/api/sync/task/{task_id}")
+async def cancel_task(task_id: str) -> JSONResponse:
+    """Cancel a pending sync task"""
+    try:
+        cancelled = await sync_manager.cancel_task(task_id)
+        
+        if not cancelled:
+            raise HTTPException(status_code=404, detail="Task not found or cannot be cancelled")
+        
+        return JSONResponse(content={
+            "task_id": task_id,
+            "status": "cancelled"
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error cancelling task: {e}")
+        raise HTTPException(status_code=500, detail="Failed to cancel task")
+
+@app.get("/api/sync/conflicts")
+async def get_conflicts() -> JSONResponse:
+    """Get all pending sync conflicts"""
+    try:
+        status = await sync_manager.get_sync_status()
+        conflicts = status.get("conflict_queue", [])
+        
+        return JSONResponse(content={
+            "conflicts": conflicts,
+            "count": len(conflicts)
+        })
+    except Exception as e:
+        logger.error(f"Error getting conflicts: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get conflicts")
+
+@app.post("/api/sync/conflicts/resolve")
+async def resolve_conflict(resolution: ConflictResolution) -> JSONResponse:
+    """Resolve a sync conflict"""
+    try:
+        if not sync_manager.sync_service:
+            raise HTTPException(status_code=503, detail="Sync service not initialized")
+        
+        resolved = await sync_manager.sync_service.resolve_conflict(
+            resolution.conflict_id,
+            resolution.resolution,
+            resolution.resolved_data
+        )
+        
+        if not resolved:
+            raise HTTPException(status_code=404, detail="Conflict not found")
+        
+        return JSONResponse(content={
+            "conflict_id": resolution.conflict_id,
+            "status": "resolved",
+            "resolution": resolution.resolution
+        })
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error resolving conflict: {e}")
+        raise HTTPException(status_code=500, detail="Failed to resolve conflict")
+
+@app.get("/api/sync/mappings")
+async def get_field_mappings() -> JSONResponse:
+    """Get field mappings for Airtable and Notion"""
+    try:
+        if not sync_manager.sync_service:
+            raise HTTPException(status_code=503, detail="Sync service not initialized")
+        
+        mappings = sync_manager.sync_service.get_field_mappings()
+        return JSONResponse(content=mappings)
+    except Exception as e:
+        logger.error(f"Error getting field mappings: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get field mappings")
+
+@app.post("/api/sync/enable")
+async def enable_sync() -> JSONResponse:
+    """Enable background sync"""
+    try:
+        if not sync_manager.sync_service:
+            if not sync_manager.initialize():
+                raise HTTPException(status_code=503, detail="Failed to initialize sync service")
+        
+        await sync_manager.start_background_sync()
+        
+        return JSONResponse(content={
+            "status": "enabled",
+            "message": "Background sync started"
+        })
+    except Exception as e:
+        logger.error(f"Error enabling sync: {e}")
+        raise HTTPException(status_code=500, detail="Failed to enable sync")
+
+@app.post("/api/sync/disable")
+async def disable_sync() -> JSONResponse:
+    """Disable background sync"""
+    try:
+        await sync_manager.stop_background_sync()
+        
+        return JSONResponse(content={
+            "status": "disabled",
+            "message": "Background sync stopped"
+        })
+    except Exception as e:
+        logger.error(f"Error disabling sync: {e}")
+        raise HTTPException(status_code=500, detail="Failed to disable sync")
 
 # Main web interface
 @app.get("/", response_class=HTMLResponse)
