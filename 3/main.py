@@ -20,6 +20,7 @@ from ai_assistant import VolunteerAIAssistant
 from matching_engine import VolunteerMatchingEngine
 from data_processor import VolunteerDataProcessor
 from database import VolunteerDatabase
+from background_check_service import BackgroundCheckService
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -41,6 +42,7 @@ app.add_middleware(
 # Global instances
 ai_assistant = VolunteerAIAssistant()
 database = VolunteerDatabase()
+background_check_service = None
 volunteer_data = None
 matching_engine = None
 
@@ -78,11 +80,24 @@ class FeedbackData(BaseModel):
     feedback_text: str = ""
     feedback_type: str = "general"
 
+class BackgroundCheckData(BaseModel):
+    user_id: Optional[str] = None
+    volunteer_contact_id: Optional[int] = None
+    check_type: str  # 'background', 'reference', 'child_protection'
+    check_provider: Optional[str] = None
+    submission_date: str
+    completion_date: Optional[str] = None
+    expiration_date: Optional[str] = None
+    status: str = "pending"
+    result: Optional[str] = None
+    notes: Optional[str] = None
+    documents: List[str] = []
+
 # Initialize data on startup
 @app.on_event("startup")
 async def startup_event():
     """Initialize application data and models"""
-    global volunteer_data, matching_engine
+    global volunteer_data, matching_engine, background_check_service
     
     print("🚀 Starting Volunteer PathFinder AI Assistant...")
     
@@ -90,6 +105,10 @@ async def startup_event():
     try:
         await database.initialize_tables()
         print("✅ Database initialized")
+        
+        # Initialize background check service
+        background_check_service = BackgroundCheckService(database)
+        print("✅ Background check service initialized")
     except Exception as e:
         print(f"⚠️  Database initialization note: {e}")
     
@@ -783,6 +802,368 @@ async def main_interface():
     </body>
     </html>
     """)
+
+# Background Check API Endpoints
+@app.post("/api/background-checks")
+async def create_background_check(
+    check_data: BackgroundCheckData,
+    background_tasks: BackgroundTasks
+) -> JSONResponse:
+    """Create a new background check record"""
+    
+    if not background_check_service:
+        raise HTTPException(status_code=503, detail="Background check service not available")
+    
+    try:
+        check = await background_check_service.create_background_check(check_data.dict(exclude_unset=True))
+        
+        if check:
+            # Track analytics
+            background_tasks.add_task(
+                database.track_event,
+                "background_check_created",
+                {
+                    "check_type": check_data.check_type,
+                    "check_provider": check_data.check_provider
+                },
+                check_data.user_id
+            )
+            
+            return JSONResponse(content={
+                "background_check": check,
+                "success": True
+            })
+        else:
+            raise HTTPException(status_code=400, detail="Failed to create background check")
+            
+    except Exception as e:
+        print(f"❌ Background check creation error: {e}")
+        raise HTTPException(status_code=500, detail="Background check creation failed")
+
+@app.get("/api/background-checks/user/{user_id}")
+async def get_user_background_checks(user_id: str) -> JSONResponse:
+    """Get all background checks for a user"""
+    
+    if not background_check_service:
+        raise HTTPException(status_code=503, detail="Background check service not available")
+    
+    try:
+        checks = await background_check_service.get_user_background_checks(user_id)
+        
+        return JSONResponse(content={
+            "background_checks": checks,
+            "success": True
+        })
+        
+    except Exception as e:
+        print(f"❌ Get background checks error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get background checks")
+
+@app.put("/api/background-checks/{check_id}/status")
+async def update_background_check_status(
+    check_id: str,
+    status: str,
+    result: Optional[str] = None,
+    completion_date: Optional[str] = None,
+    background_tasks: BackgroundTasks = None
+) -> JSONResponse:
+    """Update background check status and result"""
+    
+    if not background_check_service:
+        raise HTTPException(status_code=503, detail="Background check service not available")
+    
+    try:
+        success = await background_check_service.update_check_status(
+            check_id, status, result, completion_date
+        )
+        
+        if success:
+            # Track status change
+            background_tasks.add_task(
+                database.track_event,
+                "background_check_status_updated",
+                {
+                    "check_id": check_id,
+                    "new_status": status,
+                    "result": result
+                }
+            )
+            
+            return JSONResponse(content={"success": True})
+        else:
+            raise HTTPException(status_code=400, detail="Failed to update background check status")
+            
+    except Exception as e:
+        print(f"❌ Update background check status error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update background check status")
+
+@app.get("/api/background-checks/expiring")
+async def get_expiring_background_checks(days_ahead: int = 30) -> JSONResponse:
+    """Get background checks expiring within specified days"""
+    
+    if not background_check_service:
+        raise HTTPException(status_code=503, detail="Background check service not available")
+    
+    try:
+        expiring_checks = await background_check_service.get_expiring_checks(days_ahead)
+        
+        return JSONResponse(content={
+            "expiring_checks": expiring_checks,
+            "days_ahead": days_ahead,
+            "success": True
+        })
+        
+    except Exception as e:
+        print(f"❌ Get expiring checks error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get expiring checks")
+
+@app.get("/api/background-checks/expired")
+async def get_expired_background_checks() -> JSONResponse:
+    """Get expired background checks"""
+    
+    if not background_check_service:
+        raise HTTPException(status_code=503, detail="Background check service not available")
+    
+    try:
+        expired_checks = await background_check_service.get_expired_checks()
+        
+        return JSONResponse(content={
+            "expired_checks": expired_checks,
+            "success": True
+        })
+        
+    except Exception as e:
+        print(f"❌ Get expired checks error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get expired checks")
+
+@app.get("/api/background-checks/alerts")
+async def get_background_check_alerts(resolved: bool = False) -> JSONResponse:
+    """Get background check alerts"""
+    
+    if not background_check_service:
+        raise HTTPException(status_code=503, detail="Background check service not available")
+    
+    try:
+        alerts = await background_check_service.get_pending_alerts(resolved)
+        
+        return JSONResponse(content={
+            "alerts": alerts,
+            "resolved": resolved,
+            "success": True
+        })
+        
+    except Exception as e:
+        print(f"❌ Get alerts error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get alerts")
+
+@app.put("/api/background-checks/alerts/{alert_id}/resolve")
+async def resolve_background_check_alert(
+    alert_id: str,
+    notes: Optional[str] = None,
+    background_tasks: BackgroundTasks = None
+) -> JSONResponse:
+    """Resolve a background check alert"""
+    
+    if not background_check_service:
+        raise HTTPException(status_code=503, detail="Background check service not available")
+    
+    try:
+        success = await background_check_service.resolve_alert(alert_id, notes)
+        
+        if success:
+            # Track alert resolution
+            background_tasks.add_task(
+                database.track_event,
+                "background_check_alert_resolved",
+                {
+                    "alert_id": alert_id,
+                    "notes": notes
+                }
+            )
+            
+            return JSONResponse(content={"success": True})
+        else:
+            raise HTTPException(status_code=400, detail="Failed to resolve alert")
+            
+    except Exception as e:
+        print(f"❌ Resolve alert error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to resolve alert")
+
+@app.post("/api/recheck-workflows")
+async def initiate_recheck_workflow(
+    user_id: str,
+    original_check_id: str,
+    initiated_by: str = "admin_manual",
+    background_tasks: BackgroundTasks = None
+) -> JSONResponse:
+    """Initiate a background check renewal workflow"""
+    
+    if not background_check_service:
+        raise HTTPException(status_code=503, detail="Background check service not available")
+    
+    try:
+        workflow = await background_check_service.initiate_recheck_workflow(
+            user_id, original_check_id, initiated_by
+        )
+        
+        if workflow:
+            # Track workflow initiation
+            background_tasks.add_task(
+                database.track_event,
+                "recheck_workflow_initiated",
+                {
+                    "workflow_id": workflow['id'],
+                    "original_check_id": original_check_id,
+                    "initiated_by": initiated_by
+                },
+                user_id
+            )
+            
+            return JSONResponse(content={
+                "workflow": workflow,
+                "success": True
+            })
+        else:
+            raise HTTPException(status_code=400, detail="Failed to initiate recheck workflow")
+            
+    except Exception as e:
+        print(f"❌ Initiate recheck workflow error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to initiate recheck workflow")
+
+@app.get("/api/recheck-workflows/user/{user_id}")
+async def get_user_recheck_workflows(
+    user_id: str,
+    status: Optional[str] = None
+) -> JSONResponse:
+    """Get recheck workflows for a user"""
+    
+    if not background_check_service:
+        raise HTTPException(status_code=503, detail="Background check service not available")
+    
+    try:
+        workflows = await background_check_service.get_user_recheck_workflows(user_id, status)
+        
+        return JSONResponse(content={
+            "workflows": workflows,
+            "success": True
+        })
+        
+    except Exception as e:
+        print(f"❌ Get recheck workflows error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get recheck workflows")
+
+@app.put("/api/recheck-workflows/{workflow_id}/status")
+async def update_recheck_workflow_status(
+    workflow_id: str,
+    status: str,
+    notes: Optional[str] = None,
+    background_tasks: BackgroundTasks = None
+) -> JSONResponse:
+    """Update recheck workflow status"""
+    
+    if not background_check_service:
+        raise HTTPException(status_code=503, detail="Background check service not available")
+    
+    try:
+        success = await background_check_service.update_workflow_status(workflow_id, status, notes)
+        
+        if success:
+            # Track status change
+            background_tasks.add_task(
+                database.track_event,
+                "recheck_workflow_status_updated",
+                {
+                    "workflow_id": workflow_id,
+                    "new_status": status,
+                    "notes": notes
+                }
+            )
+            
+            return JSONResponse(content={"success": True})
+        else:
+            raise HTTPException(status_code=400, detail="Failed to update workflow status")
+            
+    except Exception as e:
+        print(f"❌ Update workflow status error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update workflow status")
+
+@app.post("/api/recheck-workflows/{workflow_id}/remind")
+async def send_recheck_workflow_reminder(
+    workflow_id: str,
+    background_tasks: BackgroundTasks = None
+) -> JSONResponse:
+    """Send reminder for recheck workflow"""
+    
+    if not background_check_service:
+        raise HTTPException(status_code=503, detail="Background check service not available")
+    
+    try:
+        success = await background_check_service.send_workflow_reminder(workflow_id)
+        
+        if success:
+            # Track reminder sent
+            background_tasks.add_task(
+                database.track_event,
+                "recheck_workflow_reminder_sent",
+                {
+                    "workflow_id": workflow_id
+                }
+            )
+            
+            return JSONResponse(content={"success": True})
+        else:
+            raise HTTPException(status_code=400, detail="Failed to send workflow reminder")
+            
+    except Exception as e:
+        print(f"❌ Send workflow reminder error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to send workflow reminder")
+
+@app.post("/api/background-checks/process-alerts")
+async def process_background_check_alerts(
+    background_tasks: BackgroundTasks = None
+) -> JSONResponse:
+    """Process and create expiration alerts for background checks"""
+    
+    if not background_check_service:
+        raise HTTPException(status_code=503, detail="Background check service not available")
+    
+    try:
+        stats = await background_check_service.process_expiration_alerts()
+        
+        # Track alert processing
+        background_tasks.add_task(
+            database.track_event,
+            "background_check_alerts_processed",
+            stats
+        )
+        
+        return JSONResponse(content={
+            "stats": stats,
+            "success": True
+        })
+        
+    except Exception as e:
+        print(f"❌ Process alerts error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to process alerts")
+
+@app.get("/api/background-checks/dashboard/{user_id}")
+async def get_background_check_dashboard(user_id: str = None) -> JSONResponse:
+    """Get dashboard statistics for background checks"""
+    
+    if not background_check_service:
+        raise HTTPException(status_code=503, detail="Background check service not available")
+    
+    try:
+        stats = await background_check_service.get_dashboard_stats(user_id)
+        
+        return JSONResponse(content={
+            "stats": stats,
+            "success": True
+        })
+        
+    except Exception as e:
+        print(f"❌ Get dashboard stats error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get dashboard stats")
 
 # Background task helpers
 async def save_conversation_message(conversation_id: str, user_message: str, 
