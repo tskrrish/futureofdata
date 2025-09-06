@@ -13,6 +13,7 @@ import asyncio
 from datetime import datetime
 import os
 import pandas as pd
+from dataclasses import asdict
 
 # Import our modules
 from config import settings
@@ -20,6 +21,10 @@ from ai_assistant import VolunteerAIAssistant
 from matching_engine import VolunteerMatchingEngine
 from data_processor import VolunteerDataProcessor
 from database import VolunteerDatabase
+from email_campaigns import (
+    EmailCampaignManager, MailchimpProvider, SendGridProvider,
+    SegmentCriteria, SegmentationType, CampaignStatus, SegmentTemplates
+)
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -43,6 +48,7 @@ ai_assistant = VolunteerAIAssistant()
 database = VolunteerDatabase()
 volunteer_data = None
 matching_engine = None
+email_campaign_manager = None
 
 # Pydantic models
 class UserProfile(BaseModel):
@@ -78,11 +84,32 @@ class FeedbackData(BaseModel):
     feedback_text: str = ""
     feedback_type: str = "general"
 
+# Email Campaign Models
+class SegmentCriteriaRequest(BaseModel):
+    type: str
+    field: str
+    operator: str
+    value: Any
+    description: str = ""
+
+class CreateCampaignRequest(BaseModel):
+    name: str
+    description: str
+    subject_line: str
+    email_content: str
+    sender_name: str
+    sender_email: str
+    segments: List[SegmentCriteriaRequest]
+    scheduled_at: Optional[datetime] = None
+
+class SendCampaignRequest(BaseModel):
+    provider: str = "mailchimp"  # mailchimp or sendgrid
+
 # Initialize data on startup
 @app.on_event("startup")
 async def startup_event():
     """Initialize application data and models"""
-    global volunteer_data, matching_engine
+    global volunteer_data, matching_engine, email_campaign_manager
     
     print("🚀 Starting Volunteer PathFinder AI Assistant...")
     
@@ -106,6 +133,24 @@ async def startup_event():
             
             print(f"✅ Loaded {len(volunteer_data['volunteers'])} volunteer profiles")
             print(f"✅ Loaded {len(volunteer_data['projects'])} projects")
+            
+            # Initialize email campaign manager
+            email_campaign_manager = EmailCampaignManager(volunteer_data, database)
+            
+            # Setup email providers (use environment variables for keys)
+            if hasattr(settings, 'MAILCHIMP_API_KEY') and hasattr(settings, 'MAILCHIMP_SERVER_PREFIX'):
+                mailchimp_provider = MailchimpProvider(
+                    settings.MAILCHIMP_API_KEY, 
+                    settings.MAILCHIMP_SERVER_PREFIX
+                )
+                email_campaign_manager.add_provider("mailchimp", mailchimp_provider)
+                print("✅ Mailchimp provider configured")
+            
+            if hasattr(settings, 'SENDGRID_API_KEY'):
+                sendgrid_provider = SendGridProvider(settings.SENDGRID_API_KEY)
+                email_campaign_manager.add_provider("sendgrid", sendgrid_provider)
+                print("✅ SendGrid provider configured")
+                
         else:
             print(f"⚠️  Volunteer data file not found: {settings.VOLUNTEER_DATA_PATH}")
     except Exception as e:
@@ -783,6 +828,230 @@ async def main_interface():
     </body>
     </html>
     """)
+
+# Email Campaign Endpoints
+@app.post("/api/campaigns")
+async def create_campaign(campaign_data: CreateCampaignRequest) -> JSONResponse:
+    """Create a new email campaign"""
+    
+    if not email_campaign_manager:
+        raise HTTPException(status_code=503, detail="Email campaign service not available")
+    
+    try:
+        # Convert request segments to SegmentCriteria objects
+        segments = []
+        for seg_req in campaign_data.segments:
+            segment = SegmentCriteria(
+                type=SegmentationType(seg_req.type),
+                field=seg_req.field,
+                operator=seg_req.operator,
+                value=seg_req.value,
+                description=seg_req.description
+            )
+            segments.append(segment)
+        
+        # Create campaign
+        campaign = await email_campaign_manager.create_campaign(
+            name=campaign_data.name,
+            description=campaign_data.description,
+            subject_line=campaign_data.subject_line,
+            email_content=campaign_data.email_content,
+            sender_name=campaign_data.sender_name,
+            sender_email=campaign_data.sender_email,
+            segments=segments,
+            scheduled_at=campaign_data.scheduled_at
+        )
+        
+        return JSONResponse(content={
+            "success": True,
+            "campaign": campaign.to_dict()
+        })
+        
+    except Exception as e:
+        print(f"❌ Campaign creation error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create campaign")
+
+@app.get("/api/campaigns")
+async def list_campaigns(status: Optional[str] = None) -> JSONResponse:
+    """List email campaigns"""
+    
+    if not email_campaign_manager:
+        raise HTTPException(status_code=503, detail="Email campaign service not available")
+    
+    try:
+        status_filter = None
+        if status:
+            status_filter = CampaignStatus(status)
+            
+        campaigns = email_campaign_manager.list_campaigns(status_filter)
+        
+        return JSONResponse(content={
+            "campaigns": [campaign.to_dict() for campaign in campaigns]
+        })
+        
+    except Exception as e:
+        print(f"❌ Campaign listing error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to list campaigns")
+
+@app.get("/api/campaigns/{campaign_id}")
+async def get_campaign(campaign_id: str) -> JSONResponse:
+    """Get campaign details"""
+    
+    if not email_campaign_manager:
+        raise HTTPException(status_code=503, detail="Email campaign service not available")
+    
+    try:
+        if campaign_id not in email_campaign_manager.campaigns:
+            raise HTTPException(status_code=404, detail="Campaign not found")
+            
+        campaign = email_campaign_manager.campaigns[campaign_id]
+        
+        return JSONResponse(content={
+            "campaign": campaign.to_dict()
+        })
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Campaign retrieval error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get campaign")
+
+@app.get("/api/campaigns/{campaign_id}/audience")
+async def get_campaign_audience(campaign_id: str) -> JSONResponse:
+    """Get campaign target audience"""
+    
+    if not email_campaign_manager:
+        raise HTTPException(status_code=503, detail="Email campaign service not available")
+    
+    try:
+        recipients = await email_campaign_manager.get_campaign_audience(campaign_id)
+        
+        return JSONResponse(content={
+            "recipients": recipients,
+            "count": len(recipients)
+        })
+        
+    except Exception as e:
+        print(f"❌ Audience retrieval error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get campaign audience")
+
+@app.post("/api/campaigns/{campaign_id}/send")
+async def send_campaign(campaign_id: str, send_data: SendCampaignRequest) -> JSONResponse:
+    """Send email campaign"""
+    
+    if not email_campaign_manager:
+        raise HTTPException(status_code=503, detail="Email campaign service not available")
+    
+    try:
+        result = await email_campaign_manager.send_campaign(campaign_id, send_data.provider)
+        
+        if result.get("success"):
+            return JSONResponse(content=result)
+        else:
+            raise HTTPException(status_code=400, detail=result.get("error", "Failed to send campaign"))
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Campaign send error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to send campaign")
+
+@app.get("/api/campaigns/{campaign_id}/analytics")
+async def get_campaign_analytics(campaign_id: str, provider: str = "mailchimp") -> JSONResponse:
+    """Get campaign analytics"""
+    
+    if not email_campaign_manager:
+        raise HTTPException(status_code=503, detail="Email campaign service not available")
+    
+    try:
+        analytics = await email_campaign_manager.get_campaign_analytics(campaign_id, provider)
+        
+        return JSONResponse(content=analytics)
+        
+    except Exception as e:
+        print(f"❌ Analytics retrieval error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get campaign analytics")
+
+@app.get("/api/segments/templates")
+async def get_segment_templates() -> JSONResponse:
+    """Get pre-defined segment templates"""
+    
+    templates = {
+        "high_engagement": {
+            "name": "High Engagement Volunteers",
+            "description": "Volunteers with 20+ hours of service",
+            "segments": [asdict(seg) for seg in SegmentTemplates.high_engagement_volunteers()]
+        },
+        "inactive_volunteers": {
+            "name": "Inactive Volunteers (90 days)",
+            "description": "Volunteers inactive for 90+ days",
+            "segments": [asdict(seg) for seg in SegmentTemplates.inactive_volunteers(90)]
+        },
+        "new_volunteers": {
+            "name": "New Volunteers (30 days)",
+            "description": "Volunteers active within 30 days",
+            "segments": [asdict(seg) for seg in SegmentTemplates.new_volunteers(30)]
+        },
+        "youth_demographic": {
+            "name": "Youth Volunteers",
+            "description": "Volunteers aged 35 and under",
+            "segments": [asdict(seg) for seg in SegmentTemplates.youth_demographic(35)]
+        }
+    }
+    
+    return JSONResponse(content={"templates": templates})
+
+@app.post("/api/segments/preview")
+async def preview_segment(segments: List[SegmentCriteriaRequest]) -> JSONResponse:
+    """Preview segment audience size and composition"""
+    
+    if not email_campaign_manager:
+        raise HTTPException(status_code=503, detail="Email campaign service not available")
+    
+    try:
+        # Convert request segments to SegmentCriteria objects
+        segment_criteria = []
+        for seg_req in segments:
+            segment = SegmentCriteria(
+                type=SegmentationType(seg_req.type),
+                field=seg_req.field,
+                operator=seg_req.operator,
+                value=seg_req.value,
+                description=seg_req.description
+            )
+            segment_criteria.append(segment)
+        
+        # Create segment preview
+        segment_df = email_campaign_manager.segmentation_engine.create_segment(segment_criteria)
+        
+        # Calculate stats
+        total_count = len(segment_df)
+        
+        stats = {
+            "total_count": total_count,
+            "age_distribution": {},
+            "branch_distribution": {},
+            "experience_distribution": {}
+        }
+        
+        if not segment_df.empty:
+            if 'age' in segment_df.columns:
+                age_stats = segment_df['age'].value_counts().to_dict()
+                stats["age_distribution"] = {str(k): v for k, v in age_stats.items()}
+            
+            if 'member_branch' in segment_df.columns:
+                branch_stats = segment_df['member_branch'].value_counts().to_dict()
+                stats["branch_distribution"] = {str(k): v for k, v in branch_stats.items()}
+            
+            if 'experience_level' in segment_df.columns:
+                exp_stats = segment_df['experience_level'].value_counts().to_dict()
+                stats["experience_distribution"] = {str(k): v for k, v in exp_stats.items()}
+        
+        return JSONResponse(content={"preview": stats})
+        
+    except Exception as e:
+        print(f"❌ Segment preview error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to preview segment")
 
 # Background task helpers
 async def save_conversation_message(conversation_id: str, user_message: str, 

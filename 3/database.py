@@ -158,8 +158,30 @@ class VolunteerDatabase:
         );
         """
         
+        # Email campaigns table
+        campaigns_sql = """
+        CREATE TABLE IF NOT EXISTS email_campaigns (
+            id UUID PRIMARY KEY,
+            name VARCHAR(200) NOT NULL,
+            description TEXT,
+            subject_line VARCHAR(200),
+            email_content TEXT,
+            sender_name VARCHAR(100),
+            sender_email VARCHAR(200),
+            segments JSONB,
+            status VARCHAR(20) DEFAULT 'draft',
+            recipient_count INTEGER DEFAULT 0,
+            open_rate DECIMAL(5,4) DEFAULT 0.0,
+            click_rate DECIMAL(5,4) DEFAULT 0.0,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            scheduled_at TIMESTAMP WITH TIME ZONE,
+            sent_at TIMESTAMP WITH TIME ZONE,
+            metadata JSONB
+        );
+        """
+        
         # Execute table creation (Note: In production, use proper migrations)
-        tables = [users_sql, preferences_sql, conversations_sql, messages_sql, matches_sql, feedback_sql, analytics_sql]
+        tables = [users_sql, preferences_sql, conversations_sql, messages_sql, matches_sql, feedback_sql, analytics_sql, campaigns_sql]
         
         print("🗄️  Setting up database tables...")
         for sql in tables:
