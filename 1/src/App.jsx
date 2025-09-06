@@ -96,6 +96,7 @@ export default function App() {
             hoursByBranch={hoursByBranch} 
             trendByMonth={trendByMonth} 
             onExportHours={exportHandlers.hoursByBranch}
+            rawData={filtered}
           />
         )}
 
