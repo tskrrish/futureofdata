@@ -28,6 +28,14 @@ from google_calendar_client import GoogleCalendarClient
 from calendar_sync_service import CalendarSyncService
 
 
+# Import A/B testing modules
+try:
+    from api_endpoints import setup_ab_test_endpoints
+    AB_TESTING_AVAILABLE = True
+except ImportError as e:
+    print(f"⚠️  A/B testing modules not available: {e}")
+    AB_TESTING_AVAILABLE = False
+
 # Initialize FastAPI app
 app = FastAPI(
     title="YMCA Volunteer PathFinder AI Assistant",
@@ -124,13 +132,7 @@ async def startup_event():
             print(f"⚠️  Volunteer data file not found: {settings.VOLUNTEER_DATA_PATH}")
     except Exception as e:
         print(f"❌ Error loading volunteer data: {e}")
-    
-    # Initialize calendar sync service
-    try:
-        calendar_sync_service = CalendarSyncService(database, calendar_client)
-        print("✅ Calendar sync service initialized")
-    except Exception as e:
-        print(f"⚠️  Calendar sync service initialization note: {e}")
+
     
     print("🎉 Volunteer PathFinder AI Assistant is ready!")
     
