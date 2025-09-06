@@ -2,7 +2,7 @@
 Main FastAPI application for Volunteer PathFinder AI Assistant
 Brings together AI, matching engine, and database
 """
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
@@ -23,8 +23,7 @@ from ai_assistant import VolunteerAIAssistant
 from matching_engine import VolunteerMatchingEngine
 from data_processor import VolunteerDataProcessor
 from database import VolunteerDatabase
-from data_retention import DataRetentionManager, RetentionPolicy, LegalHold, DataCategory, RetentionAction, LegalHoldStatus
-from retention_scheduler import RetentionScheduler, setup_default_retention_policies
+
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -85,21 +84,6 @@ class FeedbackData(BaseModel):
     feedback_text: str = ""
     feedback_type: str = "general"
 
-class RetentionPolicyRequest(BaseModel):
-    name: str
-    description: str
-    data_category: str
-    retention_period_days: int
-    archive_after_days: Optional[int] = None
-    action: str = "delete"
-
-class LegalHoldRequest(BaseModel):
-    case_name: str
-    description: str
-    data_categories: List[str]
-    user_ids: Optional[List[str]] = None
-    keywords: Optional[List[str]] = None
-    expires_at: Optional[str] = None
 
 # Initialize data on startup
 @app.on_event("startup")
@@ -185,6 +169,14 @@ async def chat_page():
         return FileResponse(file_path)
     return HTMLResponse("<h3>Chat UI not found. Create static/chat.html</h3>", status_code=404)
 
+# Serve templates UI
+@app.get("/templates", response_class=HTMLResponse)
+async def templates_page():
+    file_path = os.path.join(os.path.dirname(__file__), "static", "templates.html")
+    if os.path.exists(file_path):
+        return FileResponse(file_path)
+    return HTMLResponse("<h3>Templates UI not found.</h3>", status_code=404)
+
 class ProfileRequest(BaseModel):
     name: str
 
@@ -232,7 +224,7 @@ def _derive_preferences_from_history(history_df: pd.DataFrame) -> dict:
     return preferences
 
 @app.post("/api/profile")
-async def get_profile_analysis(req: ProfileRequest) -> JSONResponse:
+async def get_profile_analysis(req: ProfileRequest, request: Request) -> JSONResponse:
     """Analyze a volunteer's profile by their name from the Excel dataset and suggest matches."""
     if volunteer_data is None:
         raise HTTPException(status_code=503, detail="Volunteer data not loaded")
@@ -382,12 +374,28 @@ async def get_profile_analysis(req: ProfileRequest) -> JSONResponse:
         "recommendations": recs,
         "summary": "\n".join(summary_lines)
     }
-    # Save context for subsequent AI chats
+    # Apply PII redaction based on user context
+    try:
+        user_context = get_user_context_from_request(request)
+        # Apply PII masking to the profile payload
+        masked_payload = pii_engine.mask_volunteer_profile(
+            profile_payload, 
+            user_context, 
+            target_user_id=str(contact_id)
+        )
+    except Exception as e:
+        print(f"⚠️ PII redaction error: {e}")
+        # Fall back to basic public masking
+        user_context = UserContext(permission_level=ViewPermissionLevel.PUBLIC)
+        masked_payload = pii_engine.mask_data(profile_payload, user_context)
+    
+    # Save context for subsequent AI chats (use original unmasked data)
     try:
         ai_assistant.add_context("profile", profile_payload)
     except Exception:
         pass
-    return JSONResponse(content=profile_payload)
+    
+    return JSONResponse(content=masked_payload)
 
 # Main chat interface
 @app.post("/api/chat")
@@ -531,7 +539,7 @@ async def create_user(user_data: UserProfile) -> JSONResponse:
         raise HTTPException(status_code=500, detail="User creation failed")
 
 @app.get("/api/users/{user_id}")
-async def get_user(user_id: str) -> JSONResponse:
+async def get_user(user_id: str, request: Request) -> JSONResponse:
     """Get user profile"""
     
     try:
@@ -544,12 +552,28 @@ async def get_user(user_id: str) -> JSONResponse:
             # Get user matches
             matches = await database.get_user_matches(user_id)
             
-            return JSONResponse(content={
+            response_data = {
                 "user": user,
                 "preferences": preferences,
                 "matches": matches,
                 "success": True
-            })
+            }
+            
+            # Apply PII redaction based on user context
+            try:
+                user_context = get_user_context_from_request(request)
+                masked_response = pii_engine.mask_volunteer_profile(
+                    response_data, 
+                    user_context, 
+                    target_user_id=user_id
+                )
+            except Exception as e:
+                print(f"⚠️ PII redaction error: {e}")
+                # Fall back to basic public masking
+                user_context = UserContext(permission_level=ViewPermissionLevel.PUBLIC)
+                masked_response = pii_engine.mask_data(response_data, user_context)
+            
+            return JSONResponse(content=masked_response)
         else:
             raise HTTPException(status_code=404, detail="User not found")
             
@@ -718,224 +742,6 @@ async def get_resources() -> JSONResponse:
     
     return JSONResponse(content=resources)
 
-# Data Retention Policy Management
-@app.post("/api/retention/policies")
-async def create_retention_policy(policy_req: RetentionPolicyRequest) -> JSONResponse:
-    """Create a new data retention policy"""
-    if not retention_manager:
-        raise HTTPException(status_code=503, detail="Retention manager not available")
-    
-    try:
-        policy_id = str(uuid.uuid4())
-        policy = RetentionPolicy(
-            id=policy_id,
-            name=policy_req.name,
-            description=policy_req.description,
-            data_category=DataCategory(policy_req.data_category),
-            retention_period_days=policy_req.retention_period_days,
-            archive_after_days=policy_req.archive_after_days,
-            action=RetentionAction(policy_req.action)
-        )
-        
-        success = await retention_manager.create_retention_policy(policy)
-        
-        if success:
-            return JSONResponse(content={
-                "success": True,
-                "policy_id": policy_id,
-                "message": f"Retention policy '{policy_req.name}' created successfully"
-            })
-        else:
-            raise HTTPException(status_code=400, detail="Failed to create retention policy")
-            
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"Invalid parameter: {e}")
-    except Exception as e:
-        logger.error(f"❌ Error creating retention policy: {e}")
-        raise HTTPException(status_code=500, detail="Failed to create retention policy")
-
-@app.get("/api/retention/policies")
-async def get_retention_policies() -> JSONResponse:
-    """Get all retention policies"""
-    if not retention_manager:
-        raise HTTPException(status_code=503, detail="Retention manager not available")
-    
-    try:
-        await retention_manager.load_policies()
-        policies = [asdict(policy) for policy in retention_manager.policies.values()]
-        
-        # Convert datetime objects to ISO strings for JSON serialization
-        for policy in policies:
-            policy['created_at'] = policy['created_at'].isoformat()
-            policy['updated_at'] = policy['updated_at'].isoformat()
-            policy['data_category'] = policy['data_category'].value
-            policy['action'] = policy['action'].value
-        
-        return JSONResponse(content={"policies": policies})
-        
-    except Exception as e:
-        logger.error(f"❌ Error getting retention policies: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get retention policies")
-
-@app.post("/api/retention/policies/run")
-async def run_retention_policies() -> JSONResponse:
-    """Run all active retention policies"""
-    if not retention_manager:
-        raise HTTPException(status_code=503, detail="Retention manager not available")
-    
-    try:
-        results = await retention_manager.run_retention_policies()
-        
-        return JSONResponse(content={
-            "success": True,
-            "results": results,
-            "message": f"Executed {len(results)} retention policies"
-        })
-        
-    except Exception as e:
-        logger.error(f"❌ Error running retention policies: {e}")
-        raise HTTPException(status_code=500, detail="Failed to run retention policies")
-
-@app.post("/api/retention/legal-holds")
-async def create_legal_hold(hold_req: LegalHoldRequest) -> JSONResponse:
-    """Create a new legal hold"""
-    if not retention_manager:
-        raise HTTPException(status_code=503, detail="Retention manager not available")
-    
-    try:
-        hold_id = str(uuid.uuid4())
-        expires_at = None
-        if hold_req.expires_at:
-            expires_at = datetime.fromisoformat(hold_req.expires_at.replace('Z', '+00:00'))
-        
-        legal_hold = LegalHold(
-            id=hold_id,
-            case_name=hold_req.case_name,
-            description=hold_req.description,
-            data_categories=[DataCategory(cat) for cat in hold_req.data_categories],
-            user_ids=hold_req.user_ids,
-            keywords=hold_req.keywords,
-            expires_at=expires_at
-        )
-        
-        success = await retention_manager.create_legal_hold(legal_hold)
-        
-        if success:
-            return JSONResponse(content={
-                "success": True,
-                "hold_id": hold_id,
-                "message": f"Legal hold '{hold_req.case_name}' created successfully"
-            })
-        else:
-            raise HTTPException(status_code=400, detail="Failed to create legal hold")
-            
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"Invalid parameter: {e}")
-    except Exception as e:
-        logger.error(f"❌ Error creating legal hold: {e}")
-        raise HTTPException(status_code=500, detail="Failed to create legal hold")
-
-@app.get("/api/retention/legal-holds")
-async def get_legal_holds() -> JSONResponse:
-    """Get all legal holds"""
-    if not retention_manager:
-        raise HTTPException(status_code=503, detail="Retention manager not available")
-    
-    try:
-        await retention_manager.load_legal_holds()
-        holds = [asdict(hold) for hold in retention_manager.legal_holds.values()]
-        
-        # Convert datetime and enum objects for JSON serialization
-        for hold in holds:
-            hold['created_at'] = hold['created_at'].isoformat()
-            if hold['expires_at']:
-                hold['expires_at'] = hold['expires_at'].isoformat()
-            if hold['released_at']:
-                hold['released_at'] = hold['released_at'].isoformat()
-            hold['data_categories'] = [cat.value for cat in hold['data_categories']]
-            hold['status'] = hold['status'].value
-        
-        return JSONResponse(content={"legal_holds": holds})
-        
-    except Exception as e:
-        logger.error(f"❌ Error getting legal holds: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get legal holds")
-
-@app.post("/api/retention/legal-holds/{hold_id}/release")
-async def release_legal_hold(hold_id: str) -> JSONResponse:
-    """Release a legal hold"""
-    if not retention_manager:
-        raise HTTPException(status_code=503, detail="Retention manager not available")
-    
-    try:
-        success = await retention_manager.release_legal_hold(hold_id, "api_user")
-        
-        if success:
-            return JSONResponse(content={
-                "success": True,
-                "message": f"Legal hold {hold_id} released successfully"
-            })
-        else:
-            raise HTTPException(status_code=404, detail="Legal hold not found")
-            
-    except Exception as e:
-        logger.error(f"❌ Error releasing legal hold: {e}")
-        raise HTTPException(status_code=500, detail="Failed to release legal hold")
-
-@app.get("/api/retention/report")
-async def get_retention_report(days: int = 30) -> JSONResponse:
-    """Get data retention activity report"""
-    if not retention_manager:
-        raise HTTPException(status_code=503, detail="Retention manager not available")
-    
-    try:
-        report = await retention_manager.get_retention_report(days)
-        return JSONResponse(content=report)
-        
-    except Exception as e:
-        logger.error(f"❌ Error generating retention report: {e}")
-        raise HTTPException(status_code=500, detail="Failed to generate retention report")
-
-@app.get("/api/retention/data-categories")
-async def get_data_categories() -> JSONResponse:
-    """Get available data categories for retention policies"""
-    categories = [
-        {"value": cat.value, "name": cat.name.replace("_", " ").title()}
-        for cat in DataCategory
-    ]
-    
-    actions = [
-        {"value": action.value, "name": action.name.title()}
-        for action in RetentionAction
-    ]
-    
-    return JSONResponse(content={
-        "data_categories": categories,
-        "actions": actions
-    })
-
-@app.get("/api/retention/scheduler/status")
-async def get_scheduler_status() -> JSONResponse:
-    """Get retention scheduler status and job information"""
-    if not retention_scheduler:
-        return JSONResponse(content={"scheduler_available": False})
-    
-    status = retention_scheduler.get_scheduled_jobs()
-    return JSONResponse(content=status)
-
-@app.post("/api/retention/scheduler/run-manual")
-async def run_manual_retention(policy_id: Optional[str] = None) -> JSONResponse:
-    """Manually trigger retention policy execution"""
-    if not retention_scheduler:
-        raise HTTPException(status_code=503, detail="Retention scheduler not available")
-    
-    try:
-        result = await retention_scheduler.run_manual_retention(policy_id)
-        return JSONResponse(content=result)
-        
-    except Exception as e:
-        logger.error(f"❌ Manual retention execution failed: {e}")
-        raise HTTPException(status_code=500, detail="Manual retention execution failed")
 
 # Main web interface
 @app.get("/", response_class=HTMLResponse)
@@ -975,6 +781,7 @@ async def main_interface():
           <h1>YMCA Volunteer PathFinder</h1>
           <p class=\"lead\">An AI assistant that helps you explore, understand, and navigate YMCA volunteer opportunities.</p>
           <a class=\"cta\" href=\"/chat\">Start Chat</a>
+          <a class=\"cta\" href=\"/templates\" style=\"background:#38a169;margin-left:10px\">📧 Message Templates</a>
         </section>
 
         <section class=\"section\">
