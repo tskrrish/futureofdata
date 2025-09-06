@@ -78,4 +78,18 @@ class Settings:
     # Slack integration enabled
     SLACK_ENABLED: bool = os.getenv('SLACK_ENABLED', 'false').lower() == 'true'
 
+    # Salesforce Nonprofit Cloud Configuration
+    SALESFORCE_INSTANCE_URL: str = os.getenv('SALESFORCE_INSTANCE_URL', '')
+    SALESFORCE_CLIENT_ID: str = os.getenv('SALESFORCE_CLIENT_ID', '')
+    SALESFORCE_CLIENT_SECRET: str = os.getenv('SALESFORCE_CLIENT_SECRET', '')
+    SALESFORCE_USERNAME: str = os.getenv('SALESFORCE_USERNAME', '')
+    SALESFORCE_PASSWORD: str = os.getenv('SALESFORCE_PASSWORD', '')
+    SALESFORCE_SECURITY_TOKEN: str = os.getenv('SALESFORCE_SECURITY_TOKEN', '')
+    SALESFORCE_API_VERSION: str = os.getenv('SALESFORCE_API_VERSION', 'v58.0')
+    
+    # Salesforce sync settings
+    SALESFORCE_SYNC_ENABLED: bool = os.getenv('SALESFORCE_SYNC_ENABLED', 'false').lower() == 'true'
+    SALESFORCE_SYNC_INTERVAL_HOURS: int = int(os.getenv('SALESFORCE_SYNC_INTERVAL_HOURS', '24'))
+    SALESFORCE_BATCH_SIZE: int = int(os.getenv('SALESFORCE_BATCH_SIZE', '50'))
+
 settings = Settings()
