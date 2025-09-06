@@ -5,6 +5,7 @@ import { SAMPLE_DATA } from "./data/sampleData";
 import { exportCSV } from "./utils/csvUtils";
 import { useVolunteerData } from "./hooks/useVolunteerData";
 import { useFileUpload } from "./hooks/useFileUpload";
+import { useEquityMetrics } from "./hooks/useEquityMetrics";
 
 import { Header } from "./components/ui/Header";
 import { Controls } from "./components/ui/Controls";
@@ -13,6 +14,7 @@ import { OverviewTab } from "./components/tabs/OverviewTab";
 import { BranchesTab } from "./components/tabs/BranchesTab";
 import { PeopleTab } from "./components/tabs/PeopleTab";
 import { PassportTab } from "./components/tabs/PassportTab";
+import { EquityTab } from "./components/tabs/EquityTab";
 
 export default function App() {
   const [raw, setRaw] = useState(SAMPLE_DATA);
@@ -33,6 +35,13 @@ export default function App() {
     leaderboard,
     badges
   } = useVolunteerData(raw, branchFilter, search);
+
+  const {
+    participationParity,
+    accessIndicators,
+    equitySummary,
+    equityInsights
+  } = useEquityMetrics(raw, branchFilter, search);
 
   const handleFile = useFileUpload(setRaw);
 
@@ -80,6 +89,7 @@ export default function App() {
             ["branches", "Branch Breakdown"],
             ["people", "People & Badges"],
             ["passport", "Belonging Passport"],
+            ["equity", "Equity & Inclusion"],
           ].map(([id, label]) => (
             <button
               key={id}
@@ -113,6 +123,15 @@ export default function App() {
         )}
 
         {tab === "passport" && <PassportTab />}
+
+        {tab === "equity" && (
+          <EquityTab
+            participationParity={participationParity}
+            accessIndicators={accessIndicators}
+            equitySummary={equitySummary}
+            equityInsights={equityInsights}
+          />
+        )}
       </div>
 
       <footer className="max-w-7xl mx-auto px-4 py-10 text-xs text-neutral-500">
