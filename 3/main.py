@@ -20,6 +20,7 @@ from ai_assistant import VolunteerAIAssistant
 from matching_engine import VolunteerMatchingEngine
 from data_processor import VolunteerDataProcessor
 from database import VolunteerDatabase
+from semantic_search import SemanticSearchEngine
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -41,6 +42,7 @@ app.add_middleware(
 # Global instances
 ai_assistant = VolunteerAIAssistant()
 database = VolunteerDatabase()
+semantic_search = SemanticSearchEngine()
 volunteer_data = None
 matching_engine = None
 
@@ -78,6 +80,11 @@ class FeedbackData(BaseModel):
     feedback_text: str = ""
     feedback_type: str = "general"
 
+class SemanticSearchRequest(BaseModel):
+    query: str
+    search_type: str = "combined"  # "volunteers", "opportunities", "combined"
+    max_results: int = 10
+
 # Initialize data on startup
 @app.on_event("startup")
 async def startup_event():
@@ -103,6 +110,19 @@ async def startup_event():
             # Initialize matching engine
             matching_engine = VolunteerMatchingEngine(volunteer_data)
             matching_engine.train_models()
+            
+            # Initialize semantic search engine
+            try:
+                volunteer_df = volunteer_data.get('interactions', pd.DataFrame())
+                project_df = volunteer_data.get('projects', pd.DataFrame())
+                
+                if not volunteer_df.empty and not project_df.empty:
+                    semantic_search.initialize(volunteer_df, project_df)
+                    print("✅ Semantic search engine initialized")
+                else:
+                    print("⚠️  Semantic search: No data available")
+            except Exception as e:
+                print(f"⚠️  Semantic search initialization error: {e}")
             
             print(f"✅ Loaded {len(volunteer_data['volunteers'])} volunteer profiles")
             print(f"✅ Loaded {len(volunteer_data['projects'])} projects")
@@ -130,7 +150,8 @@ async def health_check():
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
         "data_loaded": volunteer_data is not None,
-        "models_ready": matching_engine is not None and matching_engine.models_trained
+        "models_ready": matching_engine is not None and matching_engine.models_trained,
+        "semantic_search_ready": semantic_search.is_initialized
     }
 
 # Serve static files (for web interface)
@@ -144,6 +165,140 @@ async def chat_page():
     if os.path.exists(file_path):
         return FileResponse(file_path)
     return HTMLResponse("<h3>Chat UI not found. Create static/chat.html</h3>", status_code=404)
+
+# Serve semantic search UI
+@app.get("/semantic-search", response_class=HTMLResponse)
+async def semantic_search_page():
+    file_path = os.path.join(os.path.dirname(__file__), "static", "semantic-search.html")
+    if os.path.exists(file_path):
+        return FileResponse(file_path)
+    return HTMLResponse("<h3>Semantic Search UI not found.</h3>", status_code=404)
+
+# Semantic Search Endpoints
+@app.post("/api/semantic-search")
+async def semantic_search_endpoint(
+    search_request: SemanticSearchRequest,
+    background_tasks: BackgroundTasks = None,
+    user_id: Optional[str] = None
+) -> JSONResponse:
+    """
+    Perform semantic search across volunteers and opportunities
+    """
+    if not semantic_search.is_initialized:
+        raise HTTPException(status_code=503, detail="Semantic search not available")
+    
+    try:
+        query = search_request.query.strip()
+        if not query:
+            raise HTTPException(status_code=400, detail="Query cannot be empty")
+        
+        # Perform search based on type
+        if search_request.search_type == "volunteers":
+            results = {
+                'query': query,
+                'search_type': 'volunteers',
+                'volunteers': semantic_search.search_volunteers(query, search_request.max_results),
+                'opportunities': [],
+                'timestamp': datetime.now().isoformat()
+            }
+        elif search_request.search_type == "opportunities":
+            results = {
+                'query': query,
+                'search_type': 'opportunities',
+                'volunteers': [],
+                'opportunities': semantic_search.search_opportunities(query, search_request.max_results),
+                'timestamp': datetime.now().isoformat()
+            }
+        else:  # combined
+            half_results = search_request.max_results // 2
+            results = semantic_search.search_combined(query, half_results, half_results)
+        
+        # Track search analytics
+        if background_tasks and user_id:
+            background_tasks.add_task(
+                database.track_event,
+                "semantic_search",
+                {
+                    "query": query,
+                    "search_type": search_request.search_type,
+                    "results_count": len(results.get('volunteers', [])) + len(results.get('opportunities', []))
+                },
+                user_id
+            )
+        
+        return JSONResponse(content=results)
+        
+    except Exception as e:
+        print(f"❌ Semantic search error: {e}")
+        raise HTTPException(status_code=500, detail="Semantic search temporarily unavailable")
+
+@app.get("/api/semantic-search/suggestions")
+async def get_search_suggestions(q: str = "") -> JSONResponse:
+    """
+    Get search suggestions for autocomplete
+    """
+    if not semantic_search.is_initialized:
+        raise HTTPException(status_code=503, detail="Semantic search not available")
+    
+    try:
+        suggestions = semantic_search.get_search_suggestions(q)
+        return JSONResponse(content={
+            "suggestions": suggestions,
+            "partial_query": q
+        })
+    except Exception as e:
+        print(f"❌ Search suggestions error: {e}")
+        raise HTTPException(status_code=500, detail="Search suggestions temporarily unavailable")
+
+@app.get("/api/semantic-search/similar-volunteers/{contact_id}")
+async def find_similar_volunteers_endpoint(contact_id: str, count: int = 5) -> JSONResponse:
+    """
+    Find volunteers similar to a given volunteer
+    """
+    if not semantic_search.is_initialized:
+        raise HTTPException(status_code=503, detail="Semantic search not available")
+    
+    try:
+        similar_volunteers = semantic_search.find_similar_volunteers(contact_id, count)
+        return JSONResponse(content={
+            "contact_id": contact_id,
+            "similar_volunteers": similar_volunteers,
+            "timestamp": datetime.now().isoformat()
+        })
+    except Exception as e:
+        print(f"❌ Similar volunteers error: {e}")
+        raise HTTPException(status_code=500, detail="Similar volunteers search temporarily unavailable")
+
+@app.get("/api/semantic-search/stats")
+async def semantic_search_stats() -> JSONResponse:
+    """
+    Get semantic search engine statistics
+    """
+    try:
+        stats = semantic_search.get_stats()
+        return JSONResponse(content=stats)
+    except Exception as e:
+        print(f"❌ Semantic search stats error: {e}")
+        raise HTTPException(status_code=500, detail="Stats temporarily unavailable")
+
+@app.post("/api/semantic-search/refresh")
+async def refresh_semantic_search() -> JSONResponse:
+    """
+    Refresh semantic search embeddings (admin endpoint)
+    """
+    if not semantic_search.is_initialized:
+        raise HTTPException(status_code=503, detail="Semantic search not available")
+    
+    try:
+        semantic_search.refresh_embeddings()
+        return JSONResponse(content={
+            "success": True,
+            "message": "Embeddings refreshed successfully",
+            "timestamp": datetime.now().isoformat()
+        })
+    except Exception as e:
+        print(f"❌ Refresh embeddings error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to refresh embeddings")
 
 class ProfileRequest(BaseModel):
     name: str
@@ -716,6 +871,7 @@ async def main_interface():
           <h1>YMCA Volunteer PathFinder</h1>
           <p class=\"lead\">An AI assistant that helps you explore, understand, and navigate YMCA volunteer opportunities.</p>
           <a class=\"cta\" href=\"/chat\">Start Chat</a>
+          <a class=\"cta\" href=\"/semantic-search\" style=\"margin-left: 10px;\">🔍 Semantic Search</a>
         </section>
 
         <section class=\"section\">
@@ -727,6 +883,7 @@ async def main_interface():
                 <li>Guide you step-by-step through VolunteerMatters onboarding</li>
                 <li>Recommend roles based on interests, age, and schedule</li>
                 <li>Point you to the right resources and next steps</li>
+                <li><strong>🔍 Semantic Search:</strong> Find people and opportunities by meaning</li>
               </ul>
             </div>
             <div class=\"card\">
@@ -767,6 +924,16 @@ async def main_interface():
                 <li>Friendly, accurate, YMCA-aligned guidance</li>
                 <li>Clear docs on how staff/branches can use it</li>
               </ul>
+            </div>
+            <div class=\"card\">
+              <h2>🔍 Semantic Search</h2>
+              <ul>
+                <li><strong>Natural Language:</strong> Search using everyday phrases like \"youth mentors\" or \"fitness coaching\"</li>
+                <li><strong>Find People:</strong> Discover volunteers with specific experience or interests</li>
+                <li><strong>Find Opportunities:</strong> Locate programs that match your passion and skills</li>
+                <li><strong>Smart Matching:</strong> AI-powered similarity scoring for best results</li>
+              </ul>
+              <p style=\"margin-top: 15px;\"><a href=\"/semantic-search\" style=\"color: #2563eb;\">Try Semantic Search →</a></p>
             </div>
             <div class=\"card\">
               <h2>Purpose & Impact</h2>
