@@ -20,6 +20,7 @@ from ai_assistant import VolunteerAIAssistant
 from matching_engine import VolunteerMatchingEngine
 from data_processor import VolunteerDataProcessor
 from database import VolunteerDatabase
+from data_cleaning_service import ConversationalDataCleaner
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -41,6 +42,7 @@ app.add_middleware(
 # Global instances
 ai_assistant = VolunteerAIAssistant()
 database = VolunteerDatabase()
+data_cleaner = ConversationalDataCleaner(ai_assistant)
 volunteer_data = None
 matching_engine = None
 
@@ -77,6 +79,19 @@ class FeedbackData(BaseModel):
     rating: Optional[int] = None
     feedback_text: str = ""
     feedback_type: str = "general"
+
+# Data Cleaning Models
+class DataUpload(BaseModel):
+    data: Dict[str, Any]
+    file_name: Optional[str] = None
+
+class CleaningAction(BaseModel):
+    action_type: str
+    parameters: Dict[str, Any]
+
+class CleaningChat(BaseModel):
+    message: str
+    session_id: Optional[str] = None
 
 # Initialize data on startup
 @app.on_event("startup")
@@ -144,6 +159,14 @@ async def chat_page():
     if os.path.exists(file_path):
         return FileResponse(file_path)
     return HTMLResponse("<h3>Chat UI not found. Create static/chat.html</h3>", status_code=404)
+
+# Serve data cleaning UI
+@app.get("/data-cleaning", response_class=HTMLResponse)
+async def data_cleaning_page():
+    file_path = os.path.join(os.path.dirname(__file__), "static", "data-cleaning.html")
+    if os.path.exists(file_path):
+        return FileResponse(file_path)
+    return HTMLResponse("<h3>Data Cleaning UI not found</h3>", status_code=404)
 
 class ProfileRequest(BaseModel):
     name: str
@@ -716,6 +739,7 @@ async def main_interface():
           <h1>YMCA Volunteer PathFinder</h1>
           <p class=\"lead\">An AI assistant that helps you explore, understand, and navigate YMCA volunteer opportunities.</p>
           <a class=\"cta\" href=\"/chat\">Start Chat</a>
+          <a class=\"cta\" href=\"/data-cleaning\" style=\"margin-left: 10px; background: #10b981;\">🧹 Clean Data</a>
         </section>
 
         <section class=\"section\">
@@ -745,6 +769,15 @@ async def main_interface():
                 <li><a href=\"https://cincinnatiymca.volunteermatters.org/project-catalog\" target=\"_blank\">VolunteerMatters Project Catalog</a></li>
                 <li><a href=\"https://ymcacincinnati.qualtrics.com/jfe/form/SV_0JklTjQEJTQmS2i\" target=\"_blank\">Volunteer Interest Form</a></li>
                 <li><a href=\"https://cincinnatiymca.volunteermatters.org/volunteer/register\" target=\"_blank\">VolunteerMatters – Register</a></li>
+              </ul>
+            </div>
+            <div class=\"card\">
+              <h2>🧹 Data Cleaning</h2>
+              <ul>
+                <li><strong>Conversational Interface</strong> – Chat to fix columns and resolve errors</li>
+                <li><strong>Smart Duplicate Detection</strong> – Find and merge similar records</li>
+                <li><strong>Automated Fixes</strong> – AI suggests and applies data corrections</li>
+                <li><strong>Export Clean Data</strong> – Download cleaned datasets in multiple formats</li>
               </ul>
             </div>
           </div>
@@ -783,6 +816,167 @@ async def main_interface():
     </body>
     </html>
     """)
+
+# Data Cleaning Endpoints
+@app.post("/api/data-cleaning/upload")
+async def upload_data_for_cleaning(data_upload: DataUpload) -> JSONResponse:
+    """Upload data for conversational cleaning"""
+    try:
+        # Load data into the cleaner
+        success = data_cleaner.load_data(data_upload.data)
+        
+        if success:
+            # Analyze data quality
+            analysis = await data_cleaner.analyze_data_quality()
+            
+            return JSONResponse(content={
+                "success": True,
+                "message": "Data uploaded successfully",
+                "data_shape": data_cleaner.data.shape if data_cleaner.data is not None else None,
+                "analysis": analysis,
+                "file_name": data_upload.file_name
+            })
+        else:
+            raise HTTPException(status_code=400, detail="Failed to load data")
+            
+    except Exception as e:
+        print(f"❌ Data upload error: {e}")
+        raise HTTPException(status_code=500, detail=f"Data upload failed: {str(e)}")
+
+@app.post("/api/data-cleaning/chat")
+async def chat_data_cleaning(cleaning_chat: CleaningChat) -> JSONResponse:
+    """Conversational interface for data cleaning"""
+    try:
+        response = await data_cleaner.chat_about_cleaning(cleaning_chat.message)
+        
+        return JSONResponse(content={
+            "response": response.get("response", ""),
+            "suggested_actions": response.get("suggested_actions", []),
+            "success": response.get("success", False),
+            "session_id": cleaning_chat.session_id
+        })
+        
+    except Exception as e:
+        print(f"❌ Data cleaning chat error: {e}")
+        raise HTTPException(status_code=500, detail="Data cleaning chat failed")
+
+@app.post("/api/data-cleaning/action")
+async def apply_cleaning_action(cleaning_action: CleaningAction) -> JSONResponse:
+    """Apply a specific cleaning action to the data"""
+    try:
+        result = data_cleaner.apply_cleaning_action(
+            cleaning_action.action_type,
+            cleaning_action.parameters
+        )
+        
+        if "error" in result:
+            raise HTTPException(status_code=400, detail=result["error"])
+        
+        return JSONResponse(content={
+            "success": True,
+            "result": result,
+            "data_shape": data_cleaner.data.shape if data_cleaner.data is not None else None
+        })
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Cleaning action error: {e}")
+        raise HTTPException(status_code=500, detail=f"Cleaning action failed: {str(e)}")
+
+@app.get("/api/data-cleaning/analysis")
+async def get_data_analysis() -> JSONResponse:
+    """Get current data quality analysis"""
+    try:
+        if data_cleaner.data is None:
+            raise HTTPException(status_code=400, detail="No data loaded")
+        
+        analysis = await data_cleaner.analyze_data_quality()
+        
+        return JSONResponse(content={
+            "success": True,
+            "analysis": analysis,
+            "data_shape": data_cleaner.data.shape,
+            "columns": data_cleaner.data.columns.tolist()
+        })
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Data analysis error: {e}")
+        raise HTTPException(status_code=500, detail="Data analysis failed")
+
+@app.get("/api/data-cleaning/history")
+async def get_cleaning_history() -> JSONResponse:
+    """Get history of cleaning operations"""
+    try:
+        summary = data_cleaner.get_cleaning_summary()
+        
+        return JSONResponse(content={
+            "success": True,
+            "summary": summary
+        })
+        
+    except Exception as e:
+        print(f"❌ Cleaning history error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get cleaning history")
+
+@app.get("/api/data-cleaning/export/{format}")
+async def export_cleaned_data(format: str) -> JSONResponse:
+    """Export cleaned data in specified format"""
+    try:
+        if data_cleaner.data is None:
+            raise HTTPException(status_code=400, detail="No data to export")
+        
+        if format not in ["csv", "xlsx", "json"]:
+            raise HTTPException(status_code=400, detail="Unsupported export format")
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"cleaned_data_{timestamp}.{format}"
+        filepath = f"/tmp/{filename}"
+        
+        if format == "csv":
+            data_cleaner.data.to_csv(filepath, index=False)
+        elif format == "xlsx":
+            success = data_cleaner.export_cleaned_data(filepath, include_history=True)
+            if not success:
+                raise HTTPException(status_code=500, detail="Export failed")
+        elif format == "json":
+            data_cleaner.data.to_json(filepath, orient="records", indent=2)
+        
+        return JSONResponse(content={
+            "success": True,
+            "message": f"Data exported successfully as {format}",
+            "filename": filename,
+            "download_url": f"/api/data-cleaning/download/{filename}"
+        })
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Export error: {e}")
+        raise HTTPException(status_code=500, detail=f"Export failed: {str(e)}")
+
+@app.get("/api/data-cleaning/download/{filename}")
+async def download_cleaned_data(filename: str):
+    """Download exported cleaned data file"""
+    try:
+        filepath = f"/tmp/{filename}"
+        
+        if not os.path.exists(filepath):
+            raise HTTPException(status_code=404, detail="File not found")
+        
+        return FileResponse(
+            path=filepath,
+            filename=filename,
+            media_type="application/octet-stream"
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Download error: {e}")
+        raise HTTPException(status_code=500, detail="Download failed")
 
 # Background task helpers
 async def save_conversation_message(conversation_id: str, user_message: str, 
