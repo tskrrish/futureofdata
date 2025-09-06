@@ -1,17 +1,28 @@
 """
 ML-Powered Volunteer Matching Engine
-Uses scikit-learn models with existing volunteer data patterns
+Uses scikit-learn models with existing volunteer data patterns and availability overlap scoring
 """
-import pandas as pd
-import numpy as np
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
-from sklearn.preprocessing import StandardScaler, LabelEncoder
-from sklearn.cluster import KMeans
-from sklearn.ensemble import RandomForestClassifier
 from typing import Dict, List, Tuple, Any, Optional
 import re
 from collections import Counter
+
+try:
+    import pandas as pd
+    import numpy as np
+    from sklearn.feature_extraction.text import TfidfVectorizer
+    from sklearn.metrics.pairwise import cosine_similarity
+    from sklearn.preprocessing import StandardScaler, LabelEncoder
+    from sklearn.cluster import KMeans
+    from sklearn.ensemble import RandomForestClassifier
+    HAS_ML_LIBS = True
+except ImportError:
+    HAS_ML_LIBS = False
+    print("⚠️  ML libraries not available. Advanced matching features disabled.")
+
+from availability_overlap_scorer import (
+    AvailabilityOverlapScorer, VolunteerAvailability, ShiftRequirement,
+    TimeWindow, DayOfWeek, create_availability_from_dict, create_time_window_from_string
+)
 
 class VolunteerMatchingEngine:
     def __init__(self, volunteer_data: Dict[str, Any]):
@@ -21,14 +32,23 @@ class VolunteerMatchingEngine:
         self.interactions_df = volunteer_data.get('interactions')
         self.insights = volunteer_data.get('insights', {})
         
-        # ML Models
-        self.tfidf_vectorizer = TfidfVectorizer(max_features=100, stop_words='english')
-        self.scaler = StandardScaler()
-        self.volunteer_clusterer = KMeans(n_clusters=5, random_state=42)
-        self.success_predictor = RandomForestClassifier(n_estimators=100, random_state=42)
+        # ML Models (only if libraries available)
+        if HAS_ML_LIBS:
+            self.tfidf_vectorizer = TfidfVectorizer(max_features=100, stop_words='english')
+            self.scaler = StandardScaler()
+            self.volunteer_clusterer = KMeans(n_clusters=5, random_state=42)
+            self.success_predictor = RandomForestClassifier(n_estimators=100, random_state=42)
+        else:
+            self.tfidf_vectorizer = None
+            self.scaler = None
+            self.volunteer_clusterer = None
+            self.success_predictor = None
         
         # Fitted models flags
         self.models_trained = False
+        
+        # Availability overlap scorer
+        self.overlap_scorer = AvailabilityOverlapScorer()
         
         # Volunteer types and characteristics
         self.volunteer_personas = {
@@ -518,6 +538,209 @@ class VolunteerMatchingEngine:
             score += 0.1
         
         return min(score, 1.0)
+    
+    def find_shift_matches_with_availability(self, user_preferences: Dict[str, Any], 
+                                           shifts: List[Dict[str, Any]], 
+                                           top_k: int = 5) -> List[Dict[str, Any]]:
+        """Find best matches using availability overlap scoring for specific shifts"""
+        if not shifts:
+            return []
+            
+        # Create volunteer availability from preferences
+        volunteer_availability = self._create_volunteer_availability_from_preferences(
+            user_preferences.get('volunteer_id', 'temp_volunteer'), 
+            user_preferences
+        )
+        
+        # Convert shifts to ShiftRequirement objects
+        shift_requirements = []
+        for shift in shifts:
+            try:
+                shift_req = self._create_shift_requirement_from_dict(shift)
+                shift_requirements.append(shift_req)
+            except Exception as e:
+                print(f"⚠️  Skipped invalid shift: {e}")
+                continue
+        
+        if not shift_requirements:
+            return []
+        
+        # Score shifts using overlap scorer
+        scored_shifts = self.overlap_scorer.score_multiple_shifts(volunteer_availability, shift_requirements)
+        
+        # Enhance with traditional matching score
+        enhanced_matches = []
+        for shift_score in scored_shifts[:top_k]:
+            # Find original shift data
+            original_shift = next((s for s in shifts if str(s.get('shift_id', '')) == shift_score['shift_id']), {})
+            
+            enhanced_match = {
+                'shift_id': shift_score['shift_id'],
+                'project_id': shift_score['project_id'],
+                'project_name': original_shift.get('project_name', 'Unknown Project'),
+                'branch': original_shift.get('branch', 'Unknown Branch'),
+                'category': original_shift.get('category', 'General'),
+                'overlap_score': shift_score['total_score'],
+                'overlap_duration_hours': shift_score['overlap_duration'],
+                'coverage_percentage': shift_score['coverage_percentage'],
+                'recommendation': shift_score['recommendation'],
+                'shift_details': {
+                    'day': original_shift.get('day_of_week', 'Unknown'),
+                    'start_time': original_shift.get('start_time', 'Unknown'),
+                    'end_time': original_shift.get('end_time', 'Unknown'),
+                    'duration_hours': original_shift.get('duration_hours', 0),
+                    'required_volunteers': original_shift.get('required_volunteers', 1)
+                },
+                'reasons': [
+                    shift_score['recommendation'],
+                    f"Availability overlap: {shift_score['overlap_duration']:.1f} hours",
+                    f"Shift coverage: {shift_score['coverage_percentage']}%"
+                ]
+            }
+            enhanced_matches.append(enhanced_match)
+        
+        return enhanced_matches
+    
+    def _create_volunteer_availability_from_preferences(self, volunteer_id: str, 
+                                                      preferences: Dict[str, Any]) -> VolunteerAvailability:
+        """Convert user preferences to VolunteerAvailability object"""
+        time_windows = []
+        availability_dict = preferences.get('availability', {})
+        
+        # Handle basic availability format (weekday, weekend, evening)
+        if isinstance(availability_dict, dict) and any(k in availability_dict for k in ['weekday', 'weekend', 'evening']):
+            # Convert basic availability to time windows
+            if availability_dict.get('weekday', False):
+                for day in ['monday', 'tuesday', 'wednesday', 'thursday', 'friday']:
+                    time_windows.append(create_time_window_from_string(day, "09:00-17:00"))
+                    
+            if availability_dict.get('weekend', False):
+                for day in ['saturday', 'sunday']:
+                    time_windows.append(create_time_window_from_string(day, "10:00-16:00"))
+                    
+            if availability_dict.get('evening', False):
+                for day in ['monday', 'tuesday', 'wednesday', 'thursday', 'friday']:
+                    time_windows.append(create_time_window_from_string(day, "18:00-21:00"))
+        
+        # Handle detailed availability format with specific windows
+        elif isinstance(availability_dict, dict) and 'windows' in availability_dict:
+            for window_dict in availability_dict['windows']:
+                try:
+                    window = create_time_window_from_string(
+                        window_dict['day'], 
+                        f"{window_dict['start']}-{window_dict['end']}"
+                    )
+                    time_windows.append(window)
+                except Exception as e:
+                    print(f"⚠️  Skipped invalid time window: {e}")
+        
+        # Default to some availability if none specified
+        if not time_windows:
+            time_windows = [create_time_window_from_string("monday", "09:00-17:00")]
+        
+        return VolunteerAvailability(
+            volunteer_id=volunteer_id,
+            time_windows=time_windows,
+            preferences=preferences,
+            max_hours_per_week=preferences.get('max_hours_per_week'),
+            min_shift_duration=preferences.get('min_shift_duration', 1.0),
+            max_shift_duration=preferences.get('max_shift_duration', 8.0)
+        )
+    
+    def _create_shift_requirement_from_dict(self, shift_dict: Dict[str, Any]) -> ShiftRequirement:
+        """Convert shift dictionary to ShiftRequirement object"""
+        # Extract day of week
+        day_str = shift_dict.get('day_of_week', 'monday').lower()
+        day_map = {
+            'monday': DayOfWeek.MONDAY, 'tuesday': DayOfWeek.TUESDAY, 
+            'wednesday': DayOfWeek.WEDNESDAY, 'thursday': DayOfWeek.THURSDAY,
+            'friday': DayOfWeek.FRIDAY, 'saturday': DayOfWeek.SATURDAY, 
+            'sunday': DayOfWeek.SUNDAY
+        }
+        
+        if day_str not in day_map:
+            raise ValueError(f"Invalid day of week: {day_str}")
+        
+        # Parse times
+        from datetime import datetime
+        start_time_str = shift_dict.get('start_time', '09:00')
+        end_time_str = shift_dict.get('end_time', '17:00')
+        
+        try:
+            start_time = datetime.strptime(start_time_str, '%H:%M').time()
+            end_time = datetime.strptime(end_time_str, '%H:%M').time()
+        except ValueError:
+            raise ValueError(f"Invalid time format: {start_time_str} or {end_time_str}")
+        
+        # Create time window
+        time_window = TimeWindow(
+            start_time=start_time,
+            end_time=end_time,
+            day_of_week=day_map[day_str]
+        )
+        
+        return ShiftRequirement(
+            shift_id=str(shift_dict.get('shift_id', 'unknown')),
+            project_id=str(shift_dict.get('project_id', 'unknown')),
+            time_window=time_window,
+            required_volunteers=shift_dict.get('required_volunteers', 1),
+            preferred_skills=shift_dict.get('preferred_skills', []),
+            minimum_duration_overlap=shift_dict.get('minimum_duration_overlap', 1.0),
+            priority=shift_dict.get('priority', 'normal')
+        )
+    
+    def create_enhanced_matches(self, user_preferences: Dict[str, Any], 
+                              include_shifts: bool = True, top_k: int = 5) -> Dict[str, Any]:
+        """Create enhanced matches combining traditional ML matching with availability overlap scoring"""
+        results = {
+            'traditional_matches': [],
+            'shift_matches': [],
+            'combined_score_matches': [],
+            'availability_report': None
+        }
+        
+        # Get traditional matches
+        results['traditional_matches'] = self.find_matches(user_preferences, top_k)
+        
+        # Get shift matches if available
+        if include_shifts and 'shifts' in user_preferences:
+            results['shift_matches'] = self.find_shift_matches_with_availability(
+                user_preferences, user_preferences['shifts'], top_k
+            )
+        
+        # Generate availability report
+        if user_preferences.get('availability'):
+            volunteer_availability = self._create_volunteer_availability_from_preferences(
+                user_preferences.get('volunteer_id', 'temp_volunteer'),
+                user_preferences
+            )
+            results['availability_report'] = self.overlap_scorer.generate_availability_report(volunteer_availability)
+        
+        # Combine and rank all matches
+        combined_matches = []
+        
+        # Add traditional matches with availability boost
+        for match in results['traditional_matches']:
+            combined_match = match.copy()
+            combined_match['match_type'] = 'traditional'
+            combined_match['combined_score'] = match.get('score', 0) * 0.7  # Weight traditional score
+            combined_matches.append(combined_match)
+        
+        # Add shift matches with their overlap scores
+        for match in results['shift_matches']:
+            combined_match = match.copy()
+            combined_match['match_type'] = 'availability_optimized'
+            combined_match['combined_score'] = (
+                match.get('overlap_score', 0) * 0.6 + 
+                0.4 * 0.8  # Assume good traditional match for shifts
+            )
+            combined_matches.append(combined_match)
+        
+        # Sort by combined score
+        combined_matches.sort(key=lambda x: x.get('combined_score', 0), reverse=True)
+        results['combined_score_matches'] = combined_matches[:top_k]
+        
+        return results
 
 # Example usage
 if __name__ == "__main__":
@@ -531,8 +754,9 @@ if __name__ == "__main__":
     matching_engine = VolunteerMatchingEngine(volunteer_data)
     matching_engine.train_models()
     
-    # Test matching
+    # Test traditional matching
     test_preferences = {
+        'volunteer_id': 'test_volunteer_001',
         'age': 28,
         'interests': 'youth development mentoring',
         'availability': {'weekday': True, 'evening': True},
@@ -541,10 +765,88 @@ if __name__ == "__main__":
         'experience_level': 1
     }
     
+    print("=== TRADITIONAL MATCHING ===")
     matches = matching_engine.find_matches(test_preferences)
-    print("Top Matches:")
     for i, match in enumerate(matches, 1):
         print(f"{i}. {match['project_name']} (Score: {match['score']:.2f})")
         print(f"   Branch: {match['branch']}")
         print(f"   Reasons: {', '.join(match['reasons'])}")
+        print()
+    
+    # Test availability overlap matching with sample shifts
+    test_shifts = [
+        {
+            'shift_id': 'shift_001',
+            'project_id': 'youth_program_001',
+            'project_name': 'Youth Mentoring Program',
+            'branch': 'Blue Ash YMCA',
+            'category': 'Youth Development',
+            'day_of_week': 'tuesday',
+            'start_time': '16:00',
+            'end_time': '19:00',
+            'duration_hours': 3,
+            'required_volunteers': 2,
+            'preferred_skills': ['mentoring', 'youth_development'],
+            'priority': 'high'
+        },
+        {
+            'shift_id': 'shift_002',
+            'project_id': 'fitness_program_001',
+            'project_name': 'Evening Group Exercise',
+            'branch': 'Blue Ash YMCA',
+            'category': 'Fitness & Wellness',
+            'day_of_week': 'monday',
+            'start_time': '18:30',
+            'end_time': '20:00',
+            'duration_hours': 1.5,
+            'required_volunteers': 1,
+            'preferred_skills': ['fitness', 'group_instruction'],
+            'priority': 'normal'
+        },
+        {
+            'shift_id': 'shift_003',
+            'project_id': 'weekend_program_001',
+            'project_name': 'Weekend Family Activities',
+            'branch': 'Campbell County YMCA',
+            'category': 'Special Events',
+            'day_of_week': 'saturday',
+            'start_time': '10:00',
+            'end_time': '14:00',
+            'duration_hours': 4,
+            'required_volunteers': 3,
+            'preferred_skills': ['event_planning', 'family_programs'],
+            'priority': 'normal'
+        }
+    ]
+    
+    test_preferences['shifts'] = test_shifts
+    
+    print("\n=== AVAILABILITY OVERLAP MATCHING ===")
+    enhanced_results = matching_engine.create_enhanced_matches(test_preferences, include_shifts=True)
+    
+    print("\nShift Matches (Availability Optimized):")
+    for i, match in enumerate(enhanced_results['shift_matches'], 1):
+        print(f"{i}. {match['project_name']}")
+        print(f"   Overlap Score: {match['overlap_score']:.3f}")
+        print(f"   Coverage: {match['coverage_percentage']}%")
+        print(f"   Recommendation: {match['recommendation']}")
+        print(f"   Shift: {match['shift_details']['day']} {match['shift_details']['start_time']}-{match['shift_details']['end_time']}")
+        print()
+    
+    print("Availability Report:")
+    if enhanced_results['availability_report']:
+        report = enhanced_results['availability_report']
+        print(f"Total Available Hours/Week: {report['total_available_hours_per_week']}")
+        for day, windows in report['availability_by_day'].items():
+            print(f"  {day}: ", end='')
+            for window in windows:
+                print(f"{window['start_time']}-{window['end_time']} ({window['duration_hours']}h)", end=' ')
+            print()
+    
+    print("\nTop Combined Matches:")
+    for i, match in enumerate(enhanced_results['combined_score_matches'][:3], 1):
+        print(f"{i}. {match.get('project_name', 'Unknown')} (Combined Score: {match['combined_score']:.3f})")
+        print(f"   Type: {match['match_type']}")
+        if match['match_type'] == 'availability_optimized':
+            print(f"   Overlap: {match.get('overlap_duration_hours', 0):.1f}h, Coverage: {match.get('coverage_percentage', 0)}%")
         print()
