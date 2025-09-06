@@ -24,6 +24,15 @@ from ai_assistant import VolunteerAIAssistant
 from matching_engine import VolunteerMatchingEngine
 from data_processor import VolunteerDataProcessor
 from database import VolunteerDatabase
+from email_sms_drafting import (
+    EmailSMSDraftingEngine, MessageType, MessageTone, OutreachPurpose, 
+    PersonalizationContext, MessageContext, DraftedMessage
+)
+from contextual_tone_analyzer import (
+    ContextualToneAnalyzer, ToneAnalysis, EngagementPattern, 
+    CommunicationStyle, ResponsivenessLevel
+)
+from message_templates import MessageTemplateEngine
 
 
 # Initialize FastAPI app
@@ -49,8 +58,6 @@ database = VolunteerDatabase()
 
 volunteer_data = None
 matching_engine = None
-calendar_client = GoogleCalendarClient()
-calendar_sync_service = None
 
 
 # Pydantic models
@@ -123,6 +130,16 @@ async def startup_event():
     except Exception as e:
         print(f"❌ Error loading volunteer data: {e}")
 
+    
+    # Initialize email/SMS drafting components
+    try:
+        print("📝 Initializing email/SMS drafting engine...")
+        drafting_engine = EmailSMSDraftingEngine(ai_assistant)
+        tone_analyzer = ContextualToneAnalyzer()
+        template_engine = MessageTemplateEngine()
+        print("✅ Email/SMS drafting engine initialized")
+    except Exception as e:
+        print(f"❌ Error initializing drafting engine: {e}")
     
     print("🎉 Volunteer PathFinder AI Assistant is ready!")
     
@@ -1204,234 +1221,7 @@ async def main_interface():
     </html>
     """)
 
-# BI Connector Management Endpoints
-@app.post("/api/bi-connectors/register")
-async def register_bi_connector(config_request: BIConnectorConfigRequest) -> JSONResponse:
-    """Register a new BI connector"""
-    try:
-        config = ConnectorConfig(
-            name=config_request.name,
-            connector_type=config_request.connector_type,
-            api_key=config_request.api_key,
-            client_id=config_request.client_id,
-            client_secret=config_request.client_secret,
-            workspace_id=config_request.workspace_id,
-            dataset_id=config_request.dataset_id,
-            table_id=config_request.table_id,
-            refresh_token=config_request.refresh_token,
-            service_account_key=config_request.service_account_key,
-            base_url=config_request.base_url,
-            custom_config=config_request.custom_config
-        )
-        
-        success = bi_connector_manager.register_connector(config)
-        
-        if success:
-            return JSONResponse(content={
-                "success": True,
-                "message": f"BI connector '{config_request.name}' registered successfully",
-                "connector_type": config_request.connector_type
-            })
-        else:
-            raise HTTPException(status_code=400, detail="Failed to register BI connector")
-            
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"BI connector registration failed: {str(e)}")
 
-@app.get("/api/bi-connectors")
-async def list_bi_connectors() -> JSONResponse:
-    """List all registered BI connectors"""
-    try:
-        connectors = bi_connector_manager.list_connectors()
-        return JSONResponse(content={
-            "success": True,
-            "connectors": connectors,
-            "count": len(connectors)
-        })
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to list connectors: {str(e)}")
-
-@app.post("/api/bi-connectors/{connector_name}/test")
-async def test_bi_connector(connector_name: str) -> JSONResponse:
-    """Test connection to a specific BI connector"""
-    try:
-        connector = bi_connector_manager.get_connector(connector_name)
-        if not connector:
-            raise HTTPException(status_code=404, detail=f"Connector '{connector_name}' not found")
-        
-        result = await connector.test_connection()
-        return JSONResponse(content={
-            "connector_name": connector_name,
-            **result
-        })
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Connection test failed: {str(e)}")
-
-@app.post("/api/bi-connectors/test-all")
-async def test_all_bi_connectors() -> JSONResponse:
-    """Test connections to all registered BI connectors"""
-    try:
-        results = await bi_connector_manager.test_all_connectors()
-        return JSONResponse(content={
-            "success": True,
-            "test_results": results
-        })
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Connection tests failed: {str(e)}")
-
-@app.post("/api/bi-connectors/export")
-async def export_data_to_bi(
-    export_request: DataExportRequest,
-    background_tasks: BackgroundTasks
-) -> JSONResponse:
-    """Export volunteer data to BI connector"""
-    try:
-        # Get volunteer data for export
-        if volunteer_data is None:
-            raise HTTPException(status_code=503, detail="Volunteer data not loaded")
-        
-        # Prepare data based on request
-        if export_request.data_query:
-            # In a real implementation, you'd parse and execute the query
-            # For now, we'll export all volunteer data
-            data_df = pd.DataFrame(volunteer_data.get('volunteers', []))
-        else:
-            # Export all volunteer data
-            data_df = pd.DataFrame(volunteer_data.get('volunteers', []))
-        
-        if data_df.empty:
-            raise HTTPException(status_code=400, detail="No data available for export")
-        
-        # Start export job in background
-        job = await bi_connector_manager.export_data_to_connector(
-            export_request.connector_name,
-            data_df,
-            export_request.table_name,
-            export_request.export_format
-        )
-        
-        return JSONResponse(content={
-            "success": True,
-            "job_id": job.id,
-            "message": f"Export job started for connector '{export_request.connector_name}'",
-            "status": job.status,
-            "record_count": job.record_count
-        })
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Data export failed: {str(e)}")
-
-@app.get("/api/bi-connectors/export-jobs/{job_id}")
-async def get_export_job_status(job_id: str) -> JSONResponse:
-    """Get status of export job"""
-    try:
-        job = bi_connector_manager.get_export_job(job_id)
-        if not job:
-            raise HTTPException(status_code=404, detail=f"Export job '{job_id}' not found")
-        
-        return JSONResponse(content={
-            "success": True,
-            "job": {
-                "id": job.id,
-                "connector_name": job.connector_name,
-                "connector_type": job.connector_type,
-                "status": job.status,
-                "created_at": job.created_at.isoformat(),
-                "started_at": job.started_at.isoformat() if job.started_at else None,
-                "completed_at": job.completed_at.isoformat() if job.completed_at else None,
-                "error_message": job.error_message,
-                "record_count": job.record_count,
-                "export_format": job.export_format
-            }
-        })
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to get job status: {str(e)}")
-
-@app.post("/api/bi-connectors/{connector_name}/refresh")
-async def refresh_bi_connector_dataset(
-    connector_name: str,
-    dataset_id: Optional[str] = None
-) -> JSONResponse:
-    """Refresh dataset in BI connector"""
-    try:
-        result = await bi_connector_manager.refresh_connector_dataset(connector_name, dataset_id)
-        
-        return JSONResponse(content={
-            "connector_name": connector_name,
-            "dataset_id": dataset_id,
-            **result
-        })
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Dataset refresh failed: {str(e)}")
-
-@app.post("/api/bi-connectors/schedules")
-async def create_refresh_schedule(schedule_request: RefreshScheduleRequest) -> JSONResponse:
-    """Create a refresh schedule for BI connector"""
-    try:
-        # Verify connector exists
-        connector = bi_connector_manager.get_connector(schedule_request.connector_name)
-        if not connector:
-            raise HTTPException(status_code=404, detail=f"Connector '{schedule_request.connector_name}' not found")
-        
-        schedule = RefreshSchedule(
-            connector_name=schedule_request.connector_name,
-            cron_expression=schedule_request.cron_expression,
-            enabled=schedule_request.enabled,
-            next_run=datetime.now() + pd.Timedelta(hours=1)  # Schedule first run in 1 hour
-        )
-        
-        bi_connector_manager.add_refresh_schedule(schedule)
-        
-        return JSONResponse(content={
-            "success": True,
-            "schedule_id": schedule.id,
-            "message": f"Refresh schedule created for connector '{schedule_request.connector_name}'",
-            "cron_expression": schedule_request.cron_expression,
-            "next_run": schedule.next_run.isoformat() if schedule.next_run else None
-        })
-        
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to create refresh schedule: {str(e)}")
-
-@app.get("/api/bi-connectors/schedules")
-async def list_refresh_schedules() -> JSONResponse:
-    """List all refresh schedules"""
-    try:
-        schedules = bi_connector_manager.get_refresh_schedules()
-        
-        return JSONResponse(content={
-            "success": True,
-            "schedules": [
-                {
-                    "id": s.id,
-                    "connector_name": s.connector_name,
-                    "cron_expression": s.cron_expression,
-                    "enabled": s.enabled,
-                    "last_run": s.last_run.isoformat() if s.last_run else None,
-                    "next_run": s.next_run.isoformat() if s.next_run else None,
-                    "created_at": s.created_at.isoformat()
-                }
-                for s in schedules
-            ],
-            "count": len(schedules)
-        })
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to list schedules: {str(e)}")
-
-@app.delete("/api/bi-connectors/{connector_name}")
-async def remove_bi_connector(connector_name: str) -> JSONResponse:
-    """Remove a BI connector"""
-    try:
-        if connector_name in bi_connector_manager.connectors:
-            del bi_connector_manager.connectors[connector_name]
-            return JSONResponse(content={
-                "success": True,
-                "message": f"BI connector '{connector_name}' removed successfully"
-            })
-        else:
-            raise HTTPException(status_code=404, detail=f"Connector '{connector_name}' not found")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to remove connector: {str(e)}")
 
 # Background task helpers
 async def save_conversation_message(conversation_id: str, user_message: str, 
