@@ -497,6 +497,323 @@ class VolunteerDatabase:
             print(f"❌ Error getting popular matches: {e}")
             return []
     
+    # Dashboard Management
+    async def create_dashboard(self, owner_id: str, dashboard_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Create a new dashboard"""
+        if not self._is_available():
+            logger.warning("Database not available, skipping dashboard creation")
+            return None
+            
+        try:
+            dashboard_record = {
+                'owner_id': owner_id,
+                'title': dashboard_data.get('title', 'Untitled Dashboard'),
+                'description': dashboard_data.get('description', ''),
+                'dashboard_data': json.dumps(dashboard_data.get('dashboard_data', {})),
+                'is_public': dashboard_data.get('is_public', False),
+                'created_at': datetime.now().isoformat(),
+                'updated_at': datetime.now().isoformat()
+            }
+            
+            response = self.supabase.table('dashboards').insert(dashboard_record).execute()
+            
+            if response.data and len(response.data) > 0:
+                logger.info(f"✅ Created dashboard: {dashboard_record['title']}")
+                return response.data[0]
+            else:
+                logger.error(f"Failed to create dashboard: {response}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"❌ Error creating dashboard: {e}")
+            return None
+    
+    async def get_dashboard(self, dashboard_id: str, user_id: str = None) -> Optional[Dict[str, Any]]:
+        """Get dashboard by ID with permission check"""
+        try:
+            result = self.supabase.table('dashboards').select('*').eq('id', dashboard_id).execute()
+            
+            if not result.data:
+                return None
+                
+            dashboard = result.data[0]
+            
+            # Parse JSON fields
+            if dashboard.get('dashboard_data'):
+                dashboard['dashboard_data'] = json.loads(dashboard['dashboard_data'])
+            
+            # Check permissions if user_id provided
+            if user_id and user_id != dashboard['owner_id']:
+                has_permission = await self.check_dashboard_permission(dashboard_id, user_id)
+                if not has_permission and not dashboard.get('is_public', False):
+                    return None
+            
+            return dashboard
+        except Exception as e:
+            logger.error(f"❌ Error getting dashboard: {e}")
+            return None
+    
+    async def update_dashboard(self, dashboard_id: str, updates: Dict[str, Any], user_id: str) -> bool:
+        """Update dashboard with permission check"""
+        try:
+            # Check if user has edit permission
+            has_edit_permission = await self.check_dashboard_permission(dashboard_id, user_id, 'edit')
+            if not has_edit_permission:
+                # Check if user is owner
+                dashboard = await self.get_dashboard(dashboard_id)
+                if not dashboard or dashboard['owner_id'] != user_id:
+                    logger.warning(f"User {user_id} doesn't have edit permission for dashboard {dashboard_id}")
+                    return False
+            
+            # Prepare update data
+            update_data = updates.copy()
+            if 'dashboard_data' in update_data:
+                update_data['dashboard_data'] = json.dumps(update_data['dashboard_data'])
+            update_data['updated_at'] = datetime.now().isoformat()
+            
+            result = self.supabase.table('dashboards').update(update_data).eq('id', dashboard_id).execute()
+            return len(result.data) > 0
+        except Exception as e:
+            logger.error(f"❌ Error updating dashboard: {e}")
+            return False
+    
+    async def delete_dashboard(self, dashboard_id: str, user_id: str) -> bool:
+        """Delete dashboard (only owner can delete)"""
+        try:
+            # Check if user is owner
+            dashboard = await self.get_dashboard(dashboard_id)
+            if not dashboard or dashboard['owner_id'] != user_id:
+                logger.warning(f"User {user_id} is not owner of dashboard {dashboard_id}")
+                return False
+            
+            result = self.supabase.table('dashboards').delete().eq('id', dashboard_id).execute()
+            return len(result.data) > 0
+        except Exception as e:
+            logger.error(f"❌ Error deleting dashboard: {e}")
+            return False
+    
+    async def get_user_dashboards(self, user_id: str) -> List[Dict[str, Any]]:
+        """Get all dashboards accessible to a user (owned + shared + public)"""
+        try:
+            dashboards = []
+            
+            # Get owned dashboards
+            owned_result = self.supabase.table('dashboards').select('*').eq('owner_id', user_id).execute()
+            for dashboard in owned_result.data:
+                if dashboard.get('dashboard_data'):
+                    dashboard['dashboard_data'] = json.loads(dashboard['dashboard_data'])
+                dashboard['permission'] = 'owner'
+                dashboards.append(dashboard)
+            
+            # Get shared dashboards
+            shared_result = self.supabase.table('dashboard_permissions')\
+                .select('*, dashboards(*)')\
+                .eq('user_id', user_id)\
+                .execute()
+            
+            for perm in shared_result.data:
+                if perm.get('dashboards'):
+                    dashboard = perm['dashboards']
+                    if dashboard.get('dashboard_data'):
+                        dashboard['dashboard_data'] = json.loads(dashboard['dashboard_data'])
+                    dashboard['permission'] = perm['permission_type']
+                    dashboard['shared_at'] = perm['created_at']
+                    dashboards.append(dashboard)
+            
+            # Get public dashboards (excluding already included ones)
+            existing_ids = {d['id'] for d in dashboards}
+            public_result = self.supabase.table('dashboards')\
+                .select('*')\
+                .eq('is_public', True)\
+                .execute()
+            
+            for dashboard in public_result.data:
+                if dashboard['id'] not in existing_ids:
+                    if dashboard.get('dashboard_data'):
+                        dashboard['dashboard_data'] = json.loads(dashboard['dashboard_data'])
+                    dashboard['permission'] = 'view'
+                    dashboards.append(dashboard)
+            
+            return dashboards
+        except Exception as e:
+            logger.error(f"❌ Error getting user dashboards: {e}")
+            return []
+    
+    # Dashboard Permissions
+    async def share_dashboard(self, dashboard_id: str, user_email: str, permission_type: str, granted_by: str) -> bool:
+        """Share dashboard with a user"""
+        try:
+            # Get user by email
+            user = await self.get_user(email=user_email)
+            if not user:
+                logger.error(f"User not found: {user_email}")
+                return False
+            
+            user_id = user['id']
+            
+            # Check if user is dashboard owner
+            dashboard = await self.get_dashboard(dashboard_id)
+            if not dashboard or dashboard['owner_id'] != granted_by:
+                logger.warning(f"User {granted_by} is not owner of dashboard {dashboard_id}")
+                return False
+            
+            # Check if permission already exists
+            existing = self.supabase.table('dashboard_permissions')\
+                .select('*')\
+                .eq('dashboard_id', dashboard_id)\
+                .eq('user_id', user_id)\
+                .execute()
+            
+            permission_data = {
+                'dashboard_id': dashboard_id,
+                'user_id': user_id,
+                'permission_type': permission_type,
+                'granted_by': granted_by,
+                'updated_at': datetime.now().isoformat()
+            }
+            
+            if existing.data:
+                # Update existing permission
+                result = self.supabase.table('dashboard_permissions')\
+                    .update(permission_data)\
+                    .eq('dashboard_id', dashboard_id)\
+                    .eq('user_id', user_id)\
+                    .execute()
+            else:
+                # Create new permission
+                permission_data['created_at'] = datetime.now().isoformat()
+                result = self.supabase.table('dashboard_permissions')\
+                    .insert(permission_data)\
+                    .execute()
+            
+            if len(result.data) > 0:
+                logger.info(f"✅ Shared dashboard {dashboard_id} with {user_email} ({permission_type})")
+                return True
+            return False
+            
+        except Exception as e:
+            logger.error(f"❌ Error sharing dashboard: {e}")
+            return False
+    
+    async def revoke_dashboard_access(self, dashboard_id: str, user_id: str, revoked_by: str) -> bool:
+        """Revoke dashboard access"""
+        try:
+            # Check if revoker is dashboard owner
+            dashboard = await self.get_dashboard(dashboard_id)
+            if not dashboard or dashboard['owner_id'] != revoked_by:
+                logger.warning(f"User {revoked_by} is not owner of dashboard {dashboard_id}")
+                return False
+            
+            result = self.supabase.table('dashboard_permissions')\
+                .delete()\
+                .eq('dashboard_id', dashboard_id)\
+                .eq('user_id', user_id)\
+                .execute()
+            
+            return len(result.data) > 0
+        except Exception as e:
+            logger.error(f"❌ Error revoking dashboard access: {e}")
+            return False
+    
+    async def get_dashboard_permissions(self, dashboard_id: str, owner_id: str) -> List[Dict[str, Any]]:
+        """Get all permissions for a dashboard"""
+        try:
+            # Check if user is dashboard owner
+            dashboard = await self.get_dashboard(dashboard_id)
+            if not dashboard or dashboard['owner_id'] != owner_id:
+                logger.warning(f"User {owner_id} is not owner of dashboard {dashboard_id}")
+                return []
+            
+            result = self.supabase.table('dashboard_permissions')\
+                .select('*, users(first_name, last_name, email)')\
+                .eq('dashboard_id', dashboard_id)\
+                .execute()
+            
+            return result.data
+        except Exception as e:
+            logger.error(f"❌ Error getting dashboard permissions: {e}")
+            return []
+    
+    async def check_dashboard_permission(self, dashboard_id: str, user_id: str, required_permission: str = 'view') -> bool:
+        """Check if user has required permission for dashboard"""
+        try:
+            # Check if user is owner
+            dashboard = await self.get_dashboard(dashboard_id)
+            if dashboard and dashboard['owner_id'] == user_id:
+                return True
+            
+            # Check if dashboard is public and only view permission required
+            if dashboard and dashboard.get('is_public', False) and required_permission == 'view':
+                return True
+            
+            # Check explicit permissions
+            result = self.supabase.table('dashboard_permissions')\
+                .select('permission_type')\
+                .eq('dashboard_id', dashboard_id)\
+                .eq('user_id', user_id)\
+                .execute()
+            
+            if not result.data:
+                return False
+            
+            user_permission = result.data[0]['permission_type']
+            
+            # Edit permission includes view permission
+            if required_permission == 'view':
+                return user_permission in ['view', 'edit']
+            elif required_permission == 'edit':
+                return user_permission == 'edit'
+            
+            return False
+        except Exception as e:
+            logger.error(f"❌ Error checking dashboard permission: {e}")
+            return False
+    
+    # Dashboard Access Logging
+    async def log_dashboard_access(self, dashboard_id: str, user_id: str, action: str, metadata: Dict[str, Any] = None) -> bool:
+        """Log dashboard access"""
+        try:
+            log_data = {
+                'dashboard_id': dashboard_id,
+                'user_id': user_id,
+                'action': action,
+                'metadata': json.dumps(metadata or {}),
+                'created_at': datetime.now().isoformat()
+            }
+            
+            result = self.supabase.table('dashboard_access_logs').insert(log_data).execute()
+            return len(result.data) > 0
+        except Exception as e:
+            logger.error(f"❌ Error logging dashboard access: {e}")
+            return False
+    
+    async def get_dashboard_access_logs(self, dashboard_id: str, owner_id: str, limit: int = 50) -> List[Dict[str, Any]]:
+        """Get dashboard access logs (only for dashboard owner)"""
+        try:
+            # Check if user is dashboard owner
+            dashboard = await self.get_dashboard(dashboard_id)
+            if not dashboard or dashboard['owner_id'] != owner_id:
+                logger.warning(f"User {owner_id} is not owner of dashboard {dashboard_id}")
+                return []
+            
+            result = self.supabase.table('dashboard_access_logs')\
+                .select('*, users(first_name, last_name, email)')\
+                .eq('dashboard_id', dashboard_id)\
+                .order('created_at', desc=True)\
+                .limit(limit)\
+                .execute()
+            
+            logs = []
+            for log in result.data:
+                if log.get('metadata'):
+                    log['metadata'] = json.loads(log['metadata'])
+                logs.append(log)
+            
+            return logs
+        except Exception as e:
+            logger.error(f"❌ Error getting dashboard access logs: {e}")
+            return []
+
     # Data Export
     async def export_volunteer_data(self) -> Dict[str, pd.DataFrame]:
         """Export all volunteer data for analysis"""
