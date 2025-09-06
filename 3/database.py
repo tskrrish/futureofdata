@@ -146,6 +146,21 @@ class VolunteerDatabase:
         );
         """
         
+        # Contact enrichment settings table
+        enrichment_settings_sql = """
+        CREATE TABLE IF NOT EXISTS contact_enrichment_settings (
+            id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+            user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+            enabled BOOLEAN DEFAULT FALSE,
+            privacy_level VARCHAR(20) DEFAULT 'none', -- 'none', 'minimal', 'standard', 'full'
+            allowed_types JSONB, -- ['domain', 'avatar']
+            consent_date TIMESTAMP WITH TIME ZONE,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            UNIQUE(user_id)
+        );
+        """
+
         # Analytics table
         analytics_sql = """
         CREATE TABLE IF NOT EXISTS analytics_events (
@@ -159,7 +174,7 @@ class VolunteerDatabase:
         """
         
         # Execute table creation (Note: In production, use proper migrations)
-        tables = [users_sql, preferences_sql, conversations_sql, messages_sql, matches_sql, feedback_sql, analytics_sql]
+        tables = [users_sql, preferences_sql, conversations_sql, messages_sql, matches_sql, feedback_sql, enrichment_settings_sql, analytics_sql]
         
         print("🗄️  Setting up database tables...")
         for sql in tables:
@@ -496,6 +511,57 @@ class VolunteerDatabase:
         except Exception as e:
             print(f"❌ Error getting popular matches: {e}")
             return []
+    
+    # Contact Enrichment Settings
+    async def get_enrichment_settings(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """Get user's contact enrichment settings"""
+        if not self._is_available():
+            return None
+            
+        try:
+            result = self.supabase.table('contact_enrichment_settings').eq('user_id', user_id).execute()
+            if result.data:
+                settings = result.data[0]
+                # Parse JSON fields
+                if settings.get('allowed_types'):
+                    settings['allowed_types'] = json.loads(settings['allowed_types'])
+                return settings
+            return None
+        except Exception as e:
+            logger.error(f"Error getting enrichment settings for user {user_id}: {e}")
+            return None
+
+    async def save_enrichment_settings(self, user_id: str, settings_data: Dict[str, Any]) -> bool:
+        """Save or update user's contact enrichment settings"""
+        if not self._is_available():
+            return False
+            
+        try:
+            # Check if settings exist
+            existing = self.supabase.table('contact_enrichment_settings').eq('user_id', user_id).execute()
+            
+            # Prepare settings data
+            enrichment_data = {
+                'user_id': user_id,
+                'enabled': settings_data.get('enabled', False),
+                'privacy_level': settings_data.get('privacy_level', 'none'),
+                'allowed_types': json.dumps(settings_data.get('allowed_types', [])),
+                'consent_date': settings_data.get('consent_date'),
+                'updated_at': datetime.now().isoformat()
+            }
+            
+            if existing.data:
+                # Update existing
+                result = self.supabase.table('contact_enrichment_settings').update(enrichment_data).eq('user_id', user_id).execute()
+            else:
+                # Create new
+                enrichment_data['created_at'] = datetime.now().isoformat()
+                result = self.supabase.table('contact_enrichment_settings').insert(enrichment_data).execute()
+            
+            return len(result.data) > 0
+        except Exception as e:
+            logger.error(f"Error saving enrichment settings for user {user_id}: {e}")
+            return False
     
     # Data Export
     async def export_volunteer_data(self) -> Dict[str, pd.DataFrame]:

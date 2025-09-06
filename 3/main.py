@@ -20,6 +20,7 @@ from ai_assistant import VolunteerAIAssistant
 from matching_engine import VolunteerMatchingEngine
 from data_processor import VolunteerDataProcessor
 from database import VolunteerDatabase
+from contact_enrichment import ContactEnrichmentService, PrivacyGateManager, EnrichmentSettings, PrivacyLevel, EnrichmentType
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -43,6 +44,8 @@ ai_assistant = VolunteerAIAssistant()
 database = VolunteerDatabase()
 volunteer_data = None
 matching_engine = None
+contact_enrichment = ContactEnrichmentService()
+privacy_manager = PrivacyGateManager(database)
 
 # Pydantic models
 class UserProfile(BaseModel):
@@ -77,6 +80,15 @@ class FeedbackData(BaseModel):
     rating: Optional[int] = None
     feedback_text: str = ""
     feedback_type: str = "general"
+
+class EnrichmentSettingsRequest(BaseModel):
+    enabled: bool = False
+    privacy_level: str = "none"  # none, minimal, standard, full
+    allowed_types: List[str] = []  # domain, avatar
+
+class ContactEnrichmentRequest(BaseModel):
+    emails: List[str]
+    user_id: Optional[str] = None
 
 # Initialize data on startup
 @app.on_event("startup")
@@ -144,6 +156,13 @@ async def chat_page():
     if os.path.exists(file_path):
         return FileResponse(file_path)
     return HTMLResponse("<h3>Chat UI not found. Create static/chat.html</h3>", status_code=404)
+
+@app.get("/privacy-settings", response_class=HTMLResponse)
+async def privacy_settings_page():
+    file_path = os.path.join(os.path.dirname(__file__), "static", "privacy-settings.html")
+    if os.path.exists(file_path):
+        return FileResponse(file_path)
+    return HTMLResponse("<h3>Privacy settings UI not found</h3>", status_code=404)
 
 class ProfileRequest(BaseModel):
     name: str
@@ -678,6 +697,227 @@ async def get_resources() -> JSONResponse:
     
     return JSONResponse(content=resources)
 
+# Contact Enrichment Endpoints
+@app.get("/api/enrichment/settings/{user_id}")
+async def get_enrichment_settings(user_id: str) -> JSONResponse:
+    """Get user's contact enrichment privacy settings"""
+    try:
+        settings = await privacy_manager.get_user_enrichment_settings(user_id)
+        
+        return JSONResponse(content={
+            "enabled": settings.enabled,
+            "privacy_level": settings.privacy_level.value,
+            "allowed_types": [t.value for t in settings.allowed_types] if settings.allowed_types else [],
+            "consent_date": settings.consent_date.isoformat() if settings.consent_date else None,
+            "last_updated": settings.last_updated.isoformat() if settings.last_updated else None,
+            "success": True
+        })
+        
+    except Exception as e:
+        print(f"❌ Error getting enrichment settings: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get enrichment settings")
+
+@app.put("/api/enrichment/settings/{user_id}")
+async def update_enrichment_settings(
+    user_id: str, 
+    request: EnrichmentSettingsRequest
+) -> JSONResponse:
+    """Update user's contact enrichment privacy settings"""
+    try:
+        # Convert request to EnrichmentSettings
+        privacy_level = PrivacyLevel(request.privacy_level)
+        allowed_types = [EnrichmentType(t) for t in request.allowed_types] if request.allowed_types else None
+        
+        settings = EnrichmentSettings(
+            enabled=request.enabled,
+            privacy_level=privacy_level,
+            allowed_types=allowed_types
+        )
+        
+        # Validate settings
+        is_valid, error_msg = privacy_manager.validate_privacy_settings(settings)
+        if not is_valid:
+            raise HTTPException(status_code=400, detail=error_msg)
+        
+        # Update settings
+        success = await privacy_manager.update_enrichment_settings(user_id, settings)
+        
+        if success:
+            # Track privacy setting change
+            await database.track_event(
+                "enrichment_settings_updated",
+                {
+                    "enabled": settings.enabled,
+                    "privacy_level": settings.privacy_level.value,
+                    "allowed_types": [t.value for t in settings.allowed_types] if settings.allowed_types else []
+                },
+                user_id
+            )
+            
+            return JSONResponse(content={"success": True, "message": "Settings updated successfully"})
+        else:
+            raise HTTPException(status_code=500, detail="Failed to update settings")
+            
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid privacy level or enrichment type: {e}")
+    except Exception as e:
+        print(f"❌ Error updating enrichment settings: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update enrichment settings")
+
+@app.post("/api/enrichment/enrich")
+async def enrich_contacts(request: ContactEnrichmentRequest) -> JSONResponse:
+    """Enrich contact information based on user's privacy settings"""
+    try:
+        if not request.emails:
+            raise HTTPException(status_code=400, detail="No emails provided")
+        
+        # Get user's enrichment settings
+        if request.user_id:
+            settings = await privacy_manager.get_user_enrichment_settings(request.user_id)
+        else:
+            # Default settings for anonymous requests (disabled)
+            settings = EnrichmentSettings()
+        
+        if not settings.enabled:
+            return JSONResponse(content={
+                "enriched_contacts": [],
+                "message": "Contact enrichment is disabled for this user",
+                "success": True
+            })
+        
+        # Prepare contacts for enrichment
+        contacts = [{"email": email} for email in request.emails]
+        
+        # Enrich contacts
+        enriched_contacts = await contact_enrichment.enrich_contacts_batch(contacts, settings)
+        
+        # Convert to serializable format
+        result_contacts = []
+        for contact in enriched_contacts:
+            contact_dict = {
+                "email": contact.email,
+                "enrichment_date": contact.enrichment_date.isoformat() if contact.enrichment_date else None,
+                "privacy_compliant": contact.privacy_compliant
+            }
+            
+            if contact.domain_info:
+                contact_dict["domain_info"] = {
+                    "domain": contact.domain_info.domain,
+                    "organization": contact.domain_info.organization,
+                    "domain_type": contact.domain_info.domain_type,
+                    "is_corporate": contact.domain_info.is_corporate,
+                    "logo_url": contact.domain_info.logo_url,
+                    "website_url": contact.domain_info.website_url
+                }
+            
+            if contact.avatar_info:
+                contact_dict["avatar_info"] = {
+                    "avatar_url": contact.avatar_info.avatar_url,
+                    "gravatar_url": contact.avatar_info.gravatar_url,
+                    "source": contact.avatar_info.source,
+                    "size": contact.avatar_info.size
+                }
+            
+            result_contacts.append(contact_dict)
+        
+        # Track enrichment usage
+        if request.user_id:
+            await database.track_event(
+                "contacts_enriched",
+                {
+                    "email_count": len(request.emails),
+                    "enriched_count": len(enriched_contacts),
+                    "privacy_level": settings.privacy_level.value
+                },
+                request.user_id
+            )
+        
+        return JSONResponse(content={
+            "enriched_contacts": result_contacts,
+            "total_processed": len(request.emails),
+            "total_enriched": len(enriched_contacts),
+            "success": True
+        })
+        
+    except Exception as e:
+        print(f"❌ Error enriching contacts: {e}")
+        raise HTTPException(status_code=500, detail="Contact enrichment failed")
+
+@app.get("/api/enrichment/privacy-levels")
+async def get_privacy_levels() -> JSONResponse:
+    """Get available privacy levels and their descriptions"""
+    try:
+        levels = {}
+        for level in PrivacyLevel:
+            levels[level.value] = {
+                "name": level.value.title(),
+                "description": privacy_manager.get_privacy_level_description(level)
+            }
+        
+        return JSONResponse(content={
+            "privacy_levels": levels,
+            "success": True
+        })
+        
+    except Exception as e:
+        print(f"❌ Error getting privacy levels: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get privacy levels")
+
+@app.get("/api/enrichment/test/{email}")
+async def test_contact_enrichment(email: str, privacy_level: str = "standard") -> JSONResponse:
+    """Test contact enrichment for a single email (for development/testing)"""
+    try:
+        # Create test settings
+        settings = EnrichmentSettings(
+            enabled=True,
+            privacy_level=PrivacyLevel(privacy_level),
+            allowed_types=[EnrichmentType.DOMAIN, EnrichmentType.AVATAR]
+        )
+        
+        # Enrich the contact
+        enriched = await contact_enrichment.enrich_contact(email, settings)
+        
+        if not enriched:
+            return JSONResponse(content={
+                "message": f"Could not enrich contact: {email}",
+                "success": False
+            })
+        
+        # Convert to serializable format
+        result = {
+            "email": enriched.email,
+            "enrichment_date": enriched.enrichment_date.isoformat() if enriched.enrichment_date else None,
+            "privacy_compliant": enriched.privacy_compliant
+        }
+        
+        if enriched.domain_info:
+            result["domain_info"] = {
+                "domain": enriched.domain_info.domain,
+                "organization": enriched.domain_info.organization,
+                "domain_type": enriched.domain_info.domain_type,
+                "is_corporate": enriched.domain_info.is_corporate,
+                "website_url": enriched.domain_info.website_url
+            }
+        
+        if enriched.avatar_info:
+            result["avatar_info"] = {
+                "avatar_url": enriched.avatar_info.avatar_url,
+                "gravatar_url": enriched.avatar_info.gravatar_url,
+                "source": enriched.avatar_info.source,
+                "size": enriched.avatar_info.size
+            }
+        
+        return JSONResponse(content={
+            "enriched_contact": result,
+            "success": True
+        })
+        
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid privacy level: {e}")
+    except Exception as e:
+        print(f"❌ Error testing contact enrichment: {e}")
+        raise HTTPException(status_code=500, detail="Test enrichment failed")
+
 # Main web interface
 @app.get("/", response_class=HTMLResponse)
 async def main_interface():
@@ -716,6 +956,7 @@ async def main_interface():
           <h1>YMCA Volunteer PathFinder</h1>
           <p class=\"lead\">An AI assistant that helps you explore, understand, and navigate YMCA volunteer opportunities.</p>
           <a class=\"cta\" href=\"/chat\">Start Chat</a>
+          <a class=\"cta\" href=\"/privacy-settings\" style=\"margin-left: 1rem; background: #fff; color: #111; border: 1px solid #111;\">Privacy Settings</a>
         </section>
 
         <section class=\"section\">
@@ -727,6 +968,7 @@ async def main_interface():
                 <li>Guide you step-by-step through VolunteerMatters onboarding</li>
                 <li>Recommend roles based on interests, age, and schedule</li>
                 <li>Point you to the right resources and next steps</li>
+                <li><strong>NEW:</strong> Optional contact enrichment with privacy controls (domains, avatars)</li>
               </ul>
             </div>
             <div class=\"card\">
