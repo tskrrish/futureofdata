@@ -65,4 +65,17 @@ class Settings:
     SYNC_DIRECTION: str = os.getenv('SYNC_DIRECTION', 'bidirectional')  # airtable_to_notion, notion_to_airtable, bidirectional
     CONFLICT_RESOLUTION: str = os.getenv('CONFLICT_RESOLUTION', 'notion_wins')  # notion_wins, airtable_wins, manual
 
+    # Slack Integration Settings
+    SLACK_BOT_TOKEN: str = os.getenv('SLACK_BOT_TOKEN', '')
+    SLACK_APP_TOKEN: str = os.getenv('SLACK_APP_TOKEN', '')
+    SLACK_SIGNING_SECRET: str = os.getenv('SLACK_SIGNING_SECRET', '')
+    
+    # Default Slack channels
+    SLACK_ANNOUNCEMENTS_CHANNEL: str = os.getenv('SLACK_ANNOUNCEMENTS_CHANNEL', '#volunteer-announcements')
+    SLACK_SHIFT_CHANNEL: str = os.getenv('SLACK_SHIFT_CHANNEL', '#shift-notifications')
+    SLACK_APPROVALS_CHANNEL: str = os.getenv('SLACK_APPROVALS_CHANNEL', '#volunteer-approvals')
+    
+    # Slack integration enabled
+    SLACK_ENABLED: bool = os.getenv('SLACK_ENABLED', 'false').lower() == 'true'
+
 settings = Settings()
