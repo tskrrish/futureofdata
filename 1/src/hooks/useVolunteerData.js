@@ -239,6 +239,74 @@ export function useVolunteerData(raw, branchFilter, search, monthFilter = "All")
       .slice(0, 15);
   }, [filtered]);
 
+  // Enhanced volunteer profiles for Badge System 2.0
+  const enhancedVolunteers = useMemo(() => {
+    const volunteerMap = new Map();
+    
+    filtered.forEach(r => {
+      const assignee = (r.assignee || "Unknown").trim();
+      const [firstName, ...lastNameParts] = assignee.split(' ');
+      const lastName = lastNameParts.join(' ') || '';
+      
+      if (!volunteerMap.has(assignee)) {
+        volunteerMap.set(assignee, {
+          first_name: firstName,
+          last_name: lastName,
+          assignee: assignee,
+          hours_total: 0,
+          assignments_count: 0,
+          storyworlds: new Set(),
+          projects: new Set(),
+          branches: new Set(),
+          first_activity: null,
+          last_activity: null,
+          training: [], // In a real system, this would come from training records
+          is_member: false
+        });
+      }
+      
+      const volunteer = volunteerMap.get(assignee);
+      volunteer.hours_total += Number(r.hours) || 0;
+      volunteer.assignments_count += 1;
+      
+      // Add storyworld based on project tags
+      const projectTag = r.project_tag || r.project_catalog || '';
+      if (projectTag.toLowerCase().includes('youth')) volunteer.storyworlds.add('Youth Spark');
+      else if (projectTag.toLowerCase().includes('healthy')) volunteer.storyworlds.add('Healthy Together');
+      else if (projectTag.toLowerCase().includes('water') || projectTag.toLowerCase().includes('aquatic')) volunteer.storyworlds.add('Water & Wellness');
+      else if (projectTag.toLowerCase().includes('community') || projectTag.toLowerCase().includes('neighbor')) volunteer.storyworlds.add('Neighbor Power');
+      else if (projectTag.toLowerCase().includes('sports')) volunteer.storyworlds.add('Sports');
+      
+      // Add projects and branches
+      if (r.project) volunteer.projects.add(r.project);
+      if (r.branch) volunteer.branches.add(r.branch);
+      
+      // Track activity dates
+      const activityDate = r.date ? new Date(r.date) : new Date();
+      if (!volunteer.first_activity || activityDate < new Date(volunteer.first_activity)) {
+        volunteer.first_activity = r.date;
+      }
+      if (!volunteer.last_activity || activityDate > new Date(volunteer.last_activity)) {
+        volunteer.last_activity = r.date;
+      }
+      
+      // Member status
+      if (r.is_member) volunteer.is_member = true;
+    });
+    
+    // Convert sets to arrays and calculate years active
+    const currentYear = new Date().getFullYear();
+    return Array.from(volunteerMap.values()).map(volunteer => ({
+      ...volunteer,
+      hours_total: Number(volunteer.hours_total.toFixed(1)),
+      storyworlds: Array.from(volunteer.storyworlds),
+      projects: Array.from(volunteer.projects),
+      branches: Array.from(volunteer.branches),
+      yearsActive: volunteer.first_activity ? 
+        Math.max(1, currentYear - new Date(volunteer.first_activity).getFullYear() + 1) : 1
+    }));
+  }, [filtered]);
+
   const badges = useMemo(() => {
     const milestones = [10, 25, 50, 100, 200, 500];
     const sums = new Map();
@@ -333,6 +401,7 @@ export function useVolunteerData(raw, branchFilter, search, monthFilter = "All")
     ydeStats,
     seniorCentersStats,
     insights,
-    enhancedKPIs
+    enhancedKPIs,
+    enhancedVolunteers
   };
 }

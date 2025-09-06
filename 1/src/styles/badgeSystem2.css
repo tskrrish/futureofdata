@@ -1,0 +1,488 @@
+/* Badge System 2.0 Styles */
+/* Enhanced badge cards with role-specific designs and rarity tiers */
+
+.badge-card-container {
+  position: relative;
+  margin: 1rem;
+}
+
+.badge-card-2 {
+  position: relative;
+  width: 320px;
+  height: 480px;
+  border-radius: 20px;
+  cursor: pointer;
+  transform-style: preserve-3d;
+  transition: transform 0.6s ease;
+}
+
+.card-face {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  backface-visibility: hidden;
+  border-radius: 20px;
+  padding: 20px;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+}
+
+.card-front {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+}
+
+.card-back {
+  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+  color: white;
+  transform: rotateY(180deg);
+}
+
+/* Header section */
+.card-header-2 {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.role-badge {
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.badge-score {
+  text-align: center;
+}
+
+.score-value {
+  display: block;
+  font-size: 24px;
+  font-weight: bold;
+  line-height: 1;
+}
+
+.score-label {
+  font-size: 10px;
+  opacity: 0.8;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+/* Volunteer info section */
+.volunteer-info {
+  text-align: center;
+  margin-bottom: 30px;
+}
+
+.volunteer-avatar-2 {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.2);
+  border: 3px solid rgba(255, 255, 255, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  font-weight: bold;
+  margin: 0 auto 15px;
+}
+
+.volunteer-name-2 {
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0 0 10px;
+}
+
+.volunteer-stats {
+  font-size: 14px;
+  opacity: 0.9;
+}
+
+/* Featured badges showcase */
+.featured-badges {
+  display: flex;
+  justify-content: center;
+  gap: 15px;
+  flex-wrap: wrap;
+  margin-bottom: 30px;
+}
+
+.featured-badge {
+  position: relative;
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.15);
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.featured-badge:hover {
+  transform: scale(1.1) rotate(5deg);
+}
+
+.badge-icon {
+  font-size: 24px;
+  z-index: 2;
+}
+
+.badge-glow {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  border-radius: 50%;
+  opacity: 0.3;
+  z-index: 1;
+}
+
+/* Rarity-specific styles */
+.rarity-common {
+  border-color: #95A5A6;
+}
+
+.rarity-uncommon {
+  border-color: #27AE60;
+  box-shadow: 0 0 15px rgba(39, 174, 96, 0.3);
+}
+
+.rarity-rare {
+  border-color: #3498DB;
+  box-shadow: 0 0 20px rgba(52, 152, 219, 0.4);
+}
+
+.rarity-epic {
+  border-color: #9B59B6;
+  box-shadow: 0 0 25px rgba(155, 89, 182, 0.5);
+  animation: epicPulse 2s infinite;
+}
+
+.rarity-legendary {
+  border-color: #F39C12;
+  box-shadow: 0 0 30px rgba(243, 156, 18, 0.6);
+  animation: legendaryGlow 2s infinite;
+}
+
+@keyframes epicPulse {
+  0%, 100% { box-shadow: 0 0 25px rgba(155, 89, 182, 0.5); }
+  50% { box-shadow: 0 0 35px rgba(155, 89, 182, 0.7); }
+}
+
+@keyframes legendaryGlow {
+  0%, 100% { 
+    box-shadow: 0 0 30px rgba(243, 156, 18, 0.6);
+    transform: scale(1);
+  }
+  50% { 
+    box-shadow: 0 0 40px rgba(243, 156, 18, 0.8);
+    transform: scale(1.05);
+  }
+}
+
+.card-footer-2 {
+  text-align: center;
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+/* Back of card styles */
+.all-badges-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.all-badges-header h4 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+}
+
+.close-btn {
+  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  color: white;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.badges-by-type {
+  max-height: 350px;
+  overflow-y: auto;
+}
+
+.badge-type-section {
+  margin-bottom: 25px;
+}
+
+.type-title {
+  font-size: 14px;
+  font-weight: 600;
+  margin-bottom: 10px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  opacity: 0.9;
+}
+
+.badge-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+  gap: 10px;
+}
+
+.mini-badge {
+  position: relative;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 10px;
+  padding: 10px 5px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.mini-badge:hover {
+  transform: scale(1.1);
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.mini-badge-icon {
+  font-size: 20px;
+  margin-bottom: 5px;
+}
+
+.mini-badge-name {
+  font-size: 9px;
+  font-weight: 500;
+  line-height: 1.2;
+}
+
+.rarity-indicator {
+  position: absolute;
+  bottom: 2px;
+  right: 2px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+/* Badge modal styles */
+.badge-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.badge-modal {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border-radius: 20px;
+  padding: 30px;
+  max-width: 400px;
+  width: 90%;
+  text-align: center;
+}
+
+.badge-modal-header {
+  margin-bottom: 20px;
+}
+
+.large-badge-icon {
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 48px;
+  margin: 0 auto 15px;
+  background: rgba(255, 255, 255, 0.15);
+  border: 3px solid rgba(255, 255, 255, 0.3);
+}
+
+.badge-modal h3 {
+  font-size: 24px;
+  font-weight: 600;
+  margin: 0 0 10px;
+}
+
+.rarity-tag {
+  display: inline-block;
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+.rarity-tag.rarity-common { background: #95A5A6; }
+.rarity-tag.rarity-uncommon { background: #27AE60; }
+.rarity-tag.rarity-rare { background: #3498DB; }
+.rarity-tag.rarity-epic { background: #9B59B6; }
+.rarity-tag.rarity-legendary { background: #F39C12; }
+
+.badge-modal-body {
+  margin-bottom: 25px;
+}
+
+.badge-description {
+  font-size: 16px;
+  line-height: 1.6;
+  margin-bottom: 20px;
+  opacity: 0.9;
+}
+
+.badge-stats {
+  display: flex;
+  justify-content: center;
+  gap: 30px;
+}
+
+.stat {
+  text-align: center;
+}
+
+.stat-label {
+  display: block;
+  font-size: 12px;
+  opacity: 0.7;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  margin-bottom: 5px;
+}
+
+.stat-value {
+  display: block;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.close-modal-btn {
+  background: rgba(255, 255, 255, 0.2);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  color: white;
+  padding: 12px 24px;
+  border-radius: 25px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  transition: all 0.3s ease;
+}
+
+.close-modal-btn:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Badge Progress Card */
+.badge-progress-card {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border-radius: 15px;
+  padding: 20px;
+  margin: 20px 0;
+}
+
+.progress-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 15px;
+}
+
+.progress-header h4 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.current-role {
+  background: rgba(255, 255, 255, 0.2);
+  padding: 6px 12px;
+  border-radius: 15px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.progress-bar {
+  margin-bottom: 15px;
+}
+
+.progress-track {
+  background: rgba(255, 255, 255, 0.2);
+  height: 8px;
+  border-radius: 4px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+.progress-fill {
+  background: linear-gradient(90deg, #27AE60, #2ECC71);
+  height: 100%;
+  border-radius: 4px;
+  transition: width 1s ease-out;
+}
+
+.progress-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  opacity: 0.8;
+}
+
+.next-role {
+  font-size: 14px;
+  text-align: center;
+}
+
+/* Responsive design */
+@media (max-width: 768px) {
+  .badge-card-2 {
+    width: 280px;
+    height: 420px;
+  }
+  
+  .featured-badges {
+    gap: 10px;
+  }
+  
+  .featured-badge {
+    width: 50px;
+    height: 50px;
+  }
+  
+  .badge-icon {
+    font-size: 20px;
+  }
+  
+  .badge-grid {
+    grid-template-columns: repeat(auto-fill, minmax(70px, 1fr));
+    gap: 8px;
+  }
+}

@@ -31,7 +31,8 @@ export default function App() {
     memberShareByBranch,
     trendByMonth,
     leaderboard,
-    badges
+    badges,
+    enhancedVolunteers
   } = useVolunteerData(raw, branchFilter, search);
 
   const handleFile = useFileUpload(setRaw);
@@ -109,7 +110,7 @@ export default function App() {
         )}
 
         {tab === "people" && (
-          <PeopleTab leaderboard={leaderboard} badges={badges} />
+          <PeopleTab leaderboard={leaderboard} badges={badges} volunteers={enhancedVolunteers} />
         )}
 
         {tab === "passport" && <PassportTab />}
