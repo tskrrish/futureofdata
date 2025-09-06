@@ -146,6 +146,37 @@ class VolunteerDatabase:
         );
         """
         
+        # Message templates table
+        message_templates_sql = """
+        CREATE TABLE IF NOT EXISTS message_templates (
+            id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+            name VARCHAR(100) NOT NULL,
+            description TEXT,
+            category VARCHAR(50), -- 'welcome', 'follow_up', 'reminder', 'thank_you', 'general'
+            subject VARCHAR(200),
+            content TEXT NOT NULL,
+            merge_fields JSONB, -- Available merge fields for this template
+            is_active BOOLEAN DEFAULT TRUE,
+            created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+        """
+        
+        # Template usage tracking table
+        template_usage_sql = """
+        CREATE TABLE IF NOT EXISTS template_usage (
+            id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+            template_id UUID REFERENCES message_templates(id) ON DELETE CASCADE,
+            user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+            recipient_email VARCHAR(255),
+            rendered_subject VARCHAR(200),
+            rendered_content TEXT,
+            merge_data JSONB, -- The actual data used for merge fields
+            sent_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+        """
+        
         # Analytics table
         analytics_sql = """
         CREATE TABLE IF NOT EXISTS analytics_events (
@@ -159,7 +190,7 @@ class VolunteerDatabase:
         """
         
         # Execute table creation (Note: In production, use proper migrations)
-        tables = [users_sql, preferences_sql, conversations_sql, messages_sql, matches_sql, feedback_sql, analytics_sql]
+        tables = [users_sql, preferences_sql, conversations_sql, messages_sql, matches_sql, feedback_sql, message_templates_sql, template_usage_sql, analytics_sql]
         
         print("🗄️  Setting up database tables...")
         for sql in tables:
@@ -496,6 +527,213 @@ class VolunteerDatabase:
         except Exception as e:
             print(f"❌ Error getting popular matches: {e}")
             return []
+    
+    # Message Templates
+    async def create_message_template(self, template_data: Dict[str, Any], created_by: str = None) -> Optional[Dict[str, Any]]:
+        """Create a new message template"""
+        if not self._is_available():
+            logger.warning("Database not available, skipping template creation")
+            return None
+        
+        try:
+            template_record = {
+                'name': template_data.get('name'),
+                'description': template_data.get('description', ''),
+                'category': template_data.get('category', 'general'),
+                'subject': template_data.get('subject', ''),
+                'content': template_data.get('content'),
+                'merge_fields': json.dumps(template_data.get('merge_fields', [])),
+                'is_active': template_data.get('is_active', True),
+                'created_by': created_by,
+                'created_at': datetime.now().isoformat(),
+                'updated_at': datetime.now().isoformat()
+            }
+            
+            result = self.supabase.table('message_templates').insert(template_record).execute()
+            
+            if result.data and len(result.data) > 0:
+                logger.info(f"✅ Created message template: {template_data.get('name')}")
+                return result.data[0]
+            return None
+        except Exception as e:
+            logger.error(f"❌ Error creating message template: {e}")
+            return None
+    
+    async def get_message_templates(self, category: str = None, active_only: bool = True) -> List[Dict[str, Any]]:
+        """Get message templates"""
+        if not self._is_available():
+            return []
+        
+        try:
+            query = self.supabase.table('message_templates').select('*')
+            
+            if active_only:
+                query = query.eq('is_active', True)
+            
+            if category:
+                query = query.eq('category', category)
+            
+            result = query.order('name').execute()
+            
+            templates = []
+            for template in result.data:
+                if template.get('merge_fields'):
+                    template['merge_fields'] = json.loads(template['merge_fields'])
+                templates.append(template)
+            
+            return templates
+        except Exception as e:
+            logger.error(f"❌ Error getting message templates: {e}")
+            return []
+    
+    async def get_message_template(self, template_id: str) -> Optional[Dict[str, Any]]:
+        """Get a specific message template"""
+        if not self._is_available():
+            return None
+        
+        try:
+            result = self.supabase.table('message_templates').select('*').eq('id', template_id).execute()
+            
+            if result.data:
+                template = result.data[0]
+                if template.get('merge_fields'):
+                    template['merge_fields'] = json.loads(template['merge_fields'])
+                return template
+            return None
+        except Exception as e:
+            logger.error(f"❌ Error getting message template: {e}")
+            return None
+    
+    async def update_message_template(self, template_id: str, updates: Dict[str, Any]) -> bool:
+        """Update a message template"""
+        if not self._is_available():
+            return False
+        
+        try:
+            if 'merge_fields' in updates:
+                updates['merge_fields'] = json.dumps(updates['merge_fields'])
+            
+            updates['updated_at'] = datetime.now().isoformat()
+            
+            result = self.supabase.table('message_templates').update(updates).eq('id', template_id).execute()
+            return len(result.data) > 0
+        except Exception as e:
+            logger.error(f"❌ Error updating message template: {e}")
+            return False
+    
+    async def delete_message_template(self, template_id: str) -> bool:
+        """Delete a message template (soft delete by marking inactive)"""
+        if not self._is_available():
+            return False
+        
+        try:
+            result = self.supabase.table('message_templates').update({
+                'is_active': False,
+                'updated_at': datetime.now().isoformat()
+            }).eq('id', template_id).execute()
+            return len(result.data) > 0
+        except Exception as e:
+            logger.error(f"❌ Error deleting message template: {e}")
+            return False
+    
+    async def render_template(self, template_id: str, merge_data: Dict[str, Any]) -> Optional[Dict[str, str]]:
+        """Render a template with merge data"""
+        template = await self.get_message_template(template_id)
+        if not template:
+            return None
+        
+        try:
+            import re
+            
+            # Simple merge field replacement using {{field}} syntax
+            def replace_merge_fields(text: str, data: Dict[str, Any]) -> str:
+                if not text:
+                    return ""
+                
+                # Find all merge fields in format {{field_name}}
+                pattern = r'\{\{([^}]+)\}\}'
+                
+                def replacer(match):
+                    field_name = match.group(1).strip()
+                    # Support nested field access like user.first_name
+                    value = data
+                    for key in field_name.split('.'):
+                        if isinstance(value, dict) and key in value:
+                            value = value[key]
+                        else:
+                            return match.group(0)  # Return original if field not found
+                    return str(value) if value is not None else ""
+                
+                return re.sub(pattern, replacer, text)
+            
+            rendered_subject = replace_merge_fields(template.get('subject', ''), merge_data)
+            rendered_content = replace_merge_fields(template.get('content', ''), merge_data)
+            
+            return {
+                'subject': rendered_subject,
+                'content': rendered_content,
+                'template_id': template_id,
+                'template_name': template.get('name', '')
+            }
+        except Exception as e:
+            logger.error(f"❌ Error rendering template: {e}")
+            return None
+    
+    async def track_template_usage(self, template_id: str, user_id: str, recipient_email: str, 
+                                 rendered_subject: str, rendered_content: str, merge_data: Dict[str, Any]) -> bool:
+        """Track template usage"""
+        if not self._is_available():
+            return False
+        
+        try:
+            usage_record = {
+                'template_id': template_id,
+                'user_id': user_id,
+                'recipient_email': recipient_email,
+                'rendered_subject': rendered_subject,
+                'rendered_content': rendered_content,
+                'merge_data': json.dumps(merge_data),
+                'sent_at': datetime.now().isoformat()
+            }
+            
+            result = self.supabase.table('template_usage').insert(usage_record).execute()
+            return len(result.data) > 0
+        except Exception as e:
+            logger.error(f"❌ Error tracking template usage: {e}")
+            return False
+    
+    async def get_template_usage_stats(self, template_id: str = None, days: int = 30) -> Dict[str, Any]:
+        """Get template usage statistics"""
+        if not self._is_available():
+            return {}
+        
+        try:
+            start_date = (datetime.now() - timedelta(days=days)).isoformat()
+            
+            query = self.supabase.table('template_usage').select('*', count='exact').gte('sent_at', start_date)
+            
+            if template_id:
+                query = query.eq('template_id', template_id)
+            
+            result = query.execute()
+            
+            # Get usage by template
+            template_usage = {}
+            for usage in result.data:
+                tid = usage.get('template_id')
+                if tid not in template_usage:
+                    template_usage[tid] = 0
+                template_usage[tid] += 1
+            
+            return {
+                'total_usage': result.count,
+                'usage_by_template': template_usage,
+                'period_days': days,
+                'generated_at': datetime.now().isoformat()
+            }
+        except Exception as e:
+            logger.error(f"❌ Error getting template usage stats: {e}")
+            return {}
     
     # Data Export
     async def export_volunteer_data(self) -> Dict[str, pd.DataFrame]:

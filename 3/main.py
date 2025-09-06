@@ -85,6 +85,43 @@ class FeedbackData(BaseModel):
     feedback_text: str = ""
     feedback_type: str = "general"
 
+class MessageTemplate(BaseModel):
+    name: str
+    description: Optional[str] = ""
+    category: str = "general"  # 'welcome', 'follow_up', 'reminder', 'thank_you', 'general'
+    subject: Optional[str] = ""
+    content: str
+    merge_fields: List[str] = []  # List of available merge fields
+    is_active: bool = True
+
+class MessageTemplateUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    category: Optional[str] = None
+    subject: Optional[str] = None
+    content: Optional[str] = None
+    merge_fields: Optional[List[str]] = None
+    is_active: Optional[bool] = None
+
+class RenderTemplateRequest(BaseModel):
+    template_id: str
+    merge_data: Dict[str, Any]
+    recipient_email: Optional[str] = None
+
+class TemplateSuggestionRequest(BaseModel):
+    situation: str
+    volunteer_info: Optional[Dict[str, Any]] = {}
+
+class TemplateCreationRequest(BaseModel):
+    purpose: str
+    category: str
+    audience: str = "volunteers"
+    tone: str = "friendly and professional"
+
+class TemplateOptimizeRequest(BaseModel):
+    content: str
+    feedback: str = ""
+
 # Initialize data on startup
 @app.on_event("startup")
 async def startup_event():
@@ -151,6 +188,14 @@ async def chat_page():
     if os.path.exists(file_path):
         return FileResponse(file_path)
     return HTMLResponse("<h3>Chat UI not found. Create static/chat.html</h3>", status_code=404)
+
+# Serve templates UI
+@app.get("/templates", response_class=HTMLResponse)
+async def templates_page():
+    file_path = os.path.join(os.path.dirname(__file__), "static", "templates.html")
+    if os.path.exists(file_path):
+        return FileResponse(file_path)
+    return HTMLResponse("<h3>Templates UI not found.</h3>", status_code=404)
 
 class ProfileRequest(BaseModel):
     name: str
@@ -717,6 +762,321 @@ async def get_resources() -> JSONResponse:
     
     return JSONResponse(content=resources)
 
+# Message Templates
+@app.post("/api/templates")
+async def create_template(
+    template_data: MessageTemplate,
+    user_id: Optional[str] = None
+) -> JSONResponse:
+    """Create a new message template"""
+    
+    try:
+        template = await database.create_message_template(
+            template_data.dict(),
+            created_by=user_id
+        )
+        
+        if template:
+            # Track template creation
+            await database.track_event(
+                "template_created",
+                {"template_name": template_data.name, "category": template_data.category},
+                user_id
+            )
+            
+            return JSONResponse(content={"template": template, "success": True})
+        else:
+            raise HTTPException(status_code=400, detail="Failed to create template")
+            
+    except Exception as e:
+        print(f"❌ Template creation error: {e}")
+        raise HTTPException(status_code=500, detail="Template creation failed")
+
+@app.get("/api/templates")
+async def get_templates(
+    category: Optional[str] = None,
+    active_only: bool = True
+) -> JSONResponse:
+    """Get message templates"""
+    
+    try:
+        templates = await database.get_message_templates(category=category, active_only=active_only)
+        
+        return JSONResponse(content={
+            "templates": templates,
+            "count": len(templates),
+            "success": True
+        })
+        
+    except Exception as e:
+        print(f"❌ Get templates error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get templates")
+
+@app.get("/api/templates/{template_id}")
+async def get_template(template_id: str) -> JSONResponse:
+    """Get a specific template"""
+    
+    try:
+        template = await database.get_message_template(template_id)
+        
+        if template:
+            return JSONResponse(content={"template": template, "success": True})
+        else:
+            raise HTTPException(status_code=404, detail="Template not found")
+            
+    except Exception as e:
+        print(f"❌ Get template error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get template")
+
+@app.put("/api/templates/{template_id}")
+async def update_template(
+    template_id: str,
+    updates: MessageTemplateUpdate,
+    user_id: Optional[str] = None
+) -> JSONResponse:
+    """Update a message template"""
+    
+    try:
+        # Only include non-None values in updates
+        update_data = {k: v for k, v in updates.dict().items() if v is not None}
+        
+        if not update_data:
+            raise HTTPException(status_code=400, detail="No updates provided")
+        
+        success = await database.update_message_template(template_id, update_data)
+        
+        if success:
+            # Track template update
+            await database.track_event(
+                "template_updated",
+                {"template_id": template_id, "fields_updated": list(update_data.keys())},
+                user_id
+            )
+            
+            return JSONResponse(content={"success": True})
+        else:
+            raise HTTPException(status_code=404, detail="Template not found or update failed")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Template update error: {e}")
+        raise HTTPException(status_code=500, detail="Template update failed")
+
+@app.delete("/api/templates/{template_id}")
+async def delete_template(
+    template_id: str,
+    user_id: Optional[str] = None
+) -> JSONResponse:
+    """Delete a message template (soft delete)"""
+    
+    try:
+        success = await database.delete_message_template(template_id)
+        
+        if success:
+            # Track template deletion
+            await database.track_event(
+                "template_deleted",
+                {"template_id": template_id},
+                user_id
+            )
+            
+            return JSONResponse(content={"success": True})
+        else:
+            raise HTTPException(status_code=404, detail="Template not found or deletion failed")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Template deletion error: {e}")
+        raise HTTPException(status_code=500, detail="Template deletion failed")
+
+@app.post("/api/templates/render")
+async def render_template(
+    render_request: RenderTemplateRequest,
+    user_id: Optional[str] = None
+) -> JSONResponse:
+    """Render a template with merge data"""
+    
+    try:
+        rendered = await database.render_template(
+            render_request.template_id,
+            render_request.merge_data
+        )
+        
+        if rendered:
+            # Track template usage if recipient provided
+            if render_request.recipient_email:
+                await database.track_template_usage(
+                    render_request.template_id,
+                    user_id or "anonymous",
+                    render_request.recipient_email,
+                    rendered['subject'],
+                    rendered['content'],
+                    render_request.merge_data
+                )
+            
+            # Track template render
+            await database.track_event(
+                "template_rendered",
+                {"template_id": render_request.template_id},
+                user_id
+            )
+            
+            return JSONResponse(content={"rendered": rendered, "success": True})
+        else:
+            raise HTTPException(status_code=404, detail="Template not found or render failed")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Template render error: {e}")
+        raise HTTPException(status_code=500, detail="Template render failed")
+
+@app.get("/api/templates/{template_id}/usage")
+async def get_template_usage(
+    template_id: str,
+    days: int = 30
+) -> JSONResponse:
+    """Get template usage statistics"""
+    
+    try:
+        stats = await database.get_template_usage_stats(template_id=template_id, days=days)
+        
+        return JSONResponse(content={
+            "usage_stats": stats,
+            "success": True
+        })
+        
+    except Exception as e:
+        print(f"❌ Template usage stats error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get usage statistics")
+
+@app.get("/api/templates/categories")
+async def get_template_categories() -> JSONResponse:
+    """Get available template categories"""
+    
+    categories = [
+        {"value": "welcome", "label": "Welcome Messages"},
+        {"value": "follow_up", "label": "Follow-up Communications"},
+        {"value": "reminder", "label": "Reminders"},
+        {"value": "thank_you", "label": "Thank You Notes"},
+        {"value": "general", "label": "General Communications"}
+    ]
+    
+    return JSONResponse(content={
+        "categories": categories,
+        "success": True
+    })
+
+@app.get("/api/merge-fields")
+async def get_available_merge_fields() -> JSONResponse:
+    """Get available merge fields for templates"""
+    
+    merge_fields = {
+        "user": [
+            "user.first_name",
+            "user.last_name", 
+            "user.email",
+            "user.phone",
+            "user.city",
+            "user.state",
+            "user.member_branch"
+        ],
+        "volunteer": [
+            "volunteer.total_hours",
+            "volunteer.sessions",
+            "volunteer.top_branch",
+            "volunteer.interests",
+            "volunteer.experience_level"
+        ],
+        "organization": [
+            "org.name",
+            "org.contact_email",
+            "org.phone",
+            "org.website"
+        ],
+        "system": [
+            "system.current_date",
+            "system.current_year"
+        ]
+    }
+    
+    return JSONResponse(content={
+        "merge_fields": merge_fields,
+        "success": True
+    })
+
+# AI-Powered Template Features
+@app.post("/api/templates/ai/suggest")
+async def suggest_template_ai(
+    request: TemplateSuggestionRequest
+) -> JSONResponse:
+    """Get AI suggestions for appropriate template based on situation"""
+    
+    try:
+        context = {
+            "situation": request.situation,
+            "volunteer_info": request.volunteer_info
+        }
+        
+        suggestion = await ai_assistant.suggest_template(context)
+        
+        return JSONResponse(content={
+            "suggestion": suggestion,
+            "success": True
+        })
+        
+    except Exception as e:
+        print(f"❌ AI template suggestion error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get AI suggestion")
+
+@app.post("/api/templates/ai/create")
+async def create_template_ai(
+    request: TemplateCreationRequest
+) -> JSONResponse:
+    """Get AI help to create a new template"""
+    
+    try:
+        template_request = {
+            "purpose": request.purpose,
+            "category": request.category,
+            "audience": request.audience,
+            "tone": request.tone
+        }
+        
+        draft = await ai_assistant.help_create_template(template_request)
+        
+        return JSONResponse(content={
+            "draft": draft,
+            "success": True
+        })
+        
+    except Exception as e:
+        print(f"❌ AI template creation error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create template with AI")
+
+@app.post("/api/templates/ai/optimize")
+async def optimize_template_ai(
+    request: TemplateOptimizeRequest
+) -> JSONResponse:
+    """Get AI help to optimize existing template content"""
+    
+    try:
+        optimized = await ai_assistant.optimize_template_content(
+            request.content,
+            request.feedback
+        )
+        
+        return JSONResponse(content={
+            "optimized": optimized,
+            "success": True
+        })
+        
+    except Exception as e:
+        print(f"❌ AI template optimization error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to optimize template with AI")
+
 # Main web interface
 @app.get("/", response_class=HTMLResponse)
 async def main_interface():
@@ -755,6 +1115,7 @@ async def main_interface():
           <h1>YMCA Volunteer PathFinder</h1>
           <p class=\"lead\">An AI assistant that helps you explore, understand, and navigate YMCA volunteer opportunities.</p>
           <a class=\"cta\" href=\"/chat\">Start Chat</a>
+          <a class=\"cta\" href=\"/templates\" style=\"background:#38a169;margin-left:10px\">📧 Message Templates</a>
         </section>
 
         <section class=\"section\">
