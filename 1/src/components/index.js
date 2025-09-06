@@ -11,3 +11,6 @@ export { OverviewTab } from "./tabs/OverviewTab";
 export { BranchesTab } from "./tabs/BranchesTab";
 export { PeopleTab } from "./tabs/PeopleTab";
 export { PassportTab } from "./tabs/PassportTab";
+
+// A/B Testing Components
+export { default as ABTestDashboard } from "./ABTestDashboard";
