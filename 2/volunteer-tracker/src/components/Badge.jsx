@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
+import { useTranslation } from 'react-i18next'
 import { makeRng } from '../utils/seeded.js'
 import { getTierData, getStoryworldChipClass, MILESTONES } from '../constants.js'
 
@@ -15,6 +16,7 @@ function hashStringToNumber(input) {
 
 
 export default function Badge({ volunteer }) {
+  const { t } = useTranslation();
   const fullName = `${volunteer.first_name} ${volunteer.last_name}`
   const seed = hashStringToNumber(fullName)
   const rng = useMemo(() => makeRng(seed), [seed])
@@ -49,7 +51,7 @@ export default function Badge({ volunteer }) {
 
   return (
     <motion.div 
-      className={`fut-card fut-card-${tierData.bgPattern} ${tierData.rarity}` 
+      className={`fut-card fut-card-${tierData.bgPattern} ${tierData.rarity}`} 
       role="img" 
       aria-label="Volunteer card"
       initial={{ 
@@ -88,7 +90,7 @@ export default function Badge({ volunteer }) {
       <div className="card-header">
         <div className="rating" style={{ color: tierData.color }}>{tierData.rating}</div>
         <div className="tier-badge" style={{ backgroundColor: tierData.color }}>{tierData.name}</div>
-        <div className="year-badge">SINCE '{String(startYear).slice(-2)}</div>
+        <div className="year-badge">{t('badge.since')} '{String(startYear).slice(-2)}</div>
       </div>
 
       {/* Volunteer Photo Area */}

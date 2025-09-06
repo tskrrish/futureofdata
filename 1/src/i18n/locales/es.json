@@ -1,0 +1,56 @@
+{
+  "header": {
+    "title": "Panel de Voluntarios YMCA",
+    "subtitle": "Pertenencia por Diseño — impulsado por datos de VolunteerMatters",
+    "exportRaw": "Exportar Datos"
+  },
+  "controls": {
+    "branch": "Sucursal",
+    "search": "Buscar",
+    "searchPlaceholder": "Buscar nombre, sucursal, fecha…"
+  },
+  "kpis": {
+    "totalHours": "Horas Totales",
+    "activeVolunteers": "Voluntarios Activos",
+    "memberVolunteers": "Voluntarios Miembros",
+    "avgHours": "Promedio Horas / Activo"
+  },
+  "tabs": {
+    "overview": "Resumen",
+    "branches": "Desglose por Sucursal",
+    "people": "Personas y Insignias",
+    "passport": "Pasaporte de Pertenencia"
+  },
+  "overview": {
+    "hoursDistribution": "Distribución de Horas por Sucursal",
+    "monthlyTrend": "Tendencia Mensual",
+    "exportHours": "Exportar Datos de Horas"
+  },
+  "branches": {
+    "activesByBranch": "Voluntarios Activos por Sucursal",
+    "memberShare": "Participación de Miembros por Sucursal",
+    "exportActives": "Exportar Datos de Activos",
+    "exportMemberShare": "Exportar Participación de Miembros"
+  },
+  "people": {
+    "leaderboard": "Tabla de Líderes",
+    "badgeDistribution": "Distribución de Insignias",
+    "hoursLabel": "horas",
+    "volunteers": "voluntarios"
+  },
+  "passport": {
+    "comingSoon": "Próximamente",
+    "description": "Las funciones del Pasaporte de Pertenencia ayudarán a rastrear y celebrar la participación de voluntarios en diferentes actividades y programas."
+  },
+  "footer": {
+    "text": "Construido para YMCA Cincinnati — Hackathon: Plataforma para la Pertenencia. Sube CSV/JSON de VolunteerMatters arriba para alimentar el panel."
+  },
+  "languageSelector": {
+    "label": "Idioma",
+    "english": "English",
+    "spanish": "Español",
+    "french": "Français",
+    "german": "Deutsch",
+    "chinese": "中文"
+  }
+}

@@ -1,17 +1,27 @@
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import confetti from 'canvas-confetti';
 import { playCheer, playDrumroll, playFanfare, playAmbientTone, playCardFlip, playMagicalSparkle } from './utils/audio.js';
 import Badge from './components/Badge.jsx';
 import CelebrationOverlay from './components/CelebrationOverlay.jsx';
+import LanguageSelector from './components/LanguageSelector.jsx';
 import { getTierForHours, MILESTONES } from './constants.js';
 
 function App() {
+  const { t, i18n } = useTranslation();
   const [searchTerm, setSearchTerm] = useState('');
   const [volunteerData, setVolunteerData] = useState(null);
   const [error, setError] = useState('');
   const firedRef = useRef(false);
   const [showOverlay, setShowOverlay] = useState(false);
   const [hideSearchBar, setHideSearchBar] = useState(false);
+
+  useEffect(() => {
+    const savedLanguage = localStorage.getItem('preferredLanguage');
+    if (savedLanguage && savedLanguage !== i18n.language) {
+      i18n.changeLanguage(savedLanguage);
+    }
+  }, [i18n]);
 
   function runFullScreenConfetti(hours) {
     const duration = Math.min(9000, 4000 + hours * 40);
@@ -38,7 +48,7 @@ function App() {
     setVolunteerData(null);
 
     if (!searchTerm.trim()) {
-      setError('Please enter a name');
+      setError(t('search.enterName'));
       return;
     }
 
@@ -59,10 +69,10 @@ function App() {
       if (found) {
         setVolunteerData(found);
       } else {
-        setError('Volunteer not found. Try "Richard Bowman" or "Christina Burke"');
+        setError(t('search.notFound'));
       }
     } catch (e) {
-      setError('Server error - make sure backend is running on port 8080');
+      setError(t('search.serverError'));
     }
   };
 
@@ -113,27 +123,25 @@ function App() {
           </div>
         ) : (
           <div className="welcome-state">
-            <div className="welcome-title">YMCA Volunteer Recognition</div>
+            <div className="welcome-title">{t('welcome.title')}</div>
             <div className="welcome-subtitle">
-              <strong>Belonging by Design</strong> – Building the Platform for Community
+              <strong>{t('welcome.subtitle')}</strong> – {t('welcome.subtitleEmphasis')}
             </div>
             <div className="welcome-story">
-              Powered by volunteers who strengthen intergenerational ties, improve mental health, and create employment pipelines. 
-              Belonging is a public health issue – loneliness equals smoking 15 cigarettes a day. 
-              Together, we're tracking belonging and impact at scale.
+              {t('welcome.story')}
             </div>
             <div className="milestone-preview">
               {MILESTONES.map((milestone, index) => {
                 const icons = ['🥉', '⭐', '🏆', '👕', '⭐']
-                const rewards = ['', '', '', ' (T-Shirt)', ' (Glass Star)']
+                const rewards = ['', '', '', ` ${t('milestones.tshirt')}`, ` ${t('milestones.glassStar')}`]
                 return (
                   <div key={milestone.label} className="milestone-tier">
-                    {icons[index]} {milestone.threshold}+ Hours → {milestone.label}{rewards[index]}
+                    {icons[index]} {milestone.threshold}+ {t('milestones.hours')} → {milestone.label}{rewards[index]}
                   </div>
                 )
               })}
             </div>
-            <div className="search-hint">↓ Search for a volunteer below ↓</div>
+            <div className="search-hint">{t('welcome.searchHint')}</div>
           </div>
         )}
       </div>
@@ -147,14 +155,17 @@ function App() {
               type="text"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              placeholder="Type volunteer name to reveal their card..."
+              placeholder={t('search.placeholder')}
               onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
             />
             <button className="search-button" onClick={handleSearch}>
-              <span>🔍</span>
+              <span>{t('search.button')}</span>
             </button>
           </div>
           {error && <div className="search-error">{error}</div>}
+          <div className="language-selector-container">
+            <LanguageSelector />
+          </div>
         </div>
       </div>
 

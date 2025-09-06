@@ -1,0 +1,41 @@
+{
+  "welcome": {
+    "title": "Reconocimiento de Voluntarios YMCA",
+    "subtitle": "Pertenencia por Diseño",
+    "subtitleEmphasis": "Construyendo la Plataforma para la Comunidad",
+    "story": "Impulsado por voluntarios que fortalecen los vínculos intergeneracionales, mejoran la salud mental y crean oportunidades de empleo. La pertenencia es un problema de salud pública: la soledad equivale a fumar 15 cigarrillos al día. Juntos, estamos rastreando la pertenencia y el impacto a escala.",
+    "searchHint": "↓ Busca un voluntario abajo ↓"
+  },
+  "milestones": {
+    "hours": "Horas",
+    "tshirt": "(Camiseta)",
+    "glassStar": "(Estrella de Cristal)"
+  },
+  "search": {
+    "placeholder": "Escribe el nombre del voluntario para revelar su tarjeta...",
+    "button": "🔍",
+    "enterName": "Por favor ingresa un nombre",
+    "notFound": "Voluntario no encontrado. Intenta \"Richard Bowman\" o \"Christina Burke\"",
+    "serverError": "Error del servidor - asegúrate de que el backend esté ejecutándose en el puerto 8080"
+  },
+  "badge": {
+    "hours": "Horas de Voluntariado",
+    "since": "Desde",
+    "tier": "Nivel",
+    "basic": "Básico",
+    "bronze": "Bronce",
+    "silver": "Plata", 
+    "gold": "Oro",
+    "diamond": "Diamante",
+    "legendary": "Legendario",
+    "special": "Especial"
+  },
+  "languageSelector": {
+    "label": "Idioma",
+    "english": "English",
+    "spanish": "Español",
+    "french": "Français",
+    "german": "Deutsch",
+    "chinese": "中文"
+  }
+}

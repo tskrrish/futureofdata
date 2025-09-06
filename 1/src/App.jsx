@@ -1,5 +1,6 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Users, Clock, UserCheck, Sparkles } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 import { SAMPLE_DATA } from "./data/sampleData";
 import { exportCSV } from "./utils/csvUtils";
@@ -15,10 +16,18 @@ import { PeopleTab } from "./components/tabs/PeopleTab";
 import { PassportTab } from "./components/tabs/PassportTab";
 
 export default function App() {
+  const { t, i18n } = useTranslation();
   const [raw, setRaw] = useState(SAMPLE_DATA);
   const [branchFilter, setBranchFilter] = useState("All");
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState("overview");
+
+  useEffect(() => {
+    const savedLanguage = localStorage.getItem('preferredLanguage');
+    if (savedLanguage && savedLanguage !== i18n.language) {
+      i18n.changeLanguage(savedLanguage);
+    }
+  }, [i18n]);
 
   const {
     branches,
@@ -57,17 +66,17 @@ export default function App() {
 
       {/* KPI Cards */}
       <div className="max-w-7xl mx-auto px-4 grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <KPI icon={<Clock className="w-5 h-5" />} label="Total Hours" value={totalHours.toFixed(1)} />
-        <KPI icon={<Users className="w-5 h-5" />} label="Active Volunteers" value={activeVolunteersCount} />
+        <KPI icon={<Clock className="w-5 h-5" />} label={t('kpis.totalHours')} value={totalHours.toFixed(1)} />
+        <KPI icon={<Users className="w-5 h-5" />} label={t('kpis.activeVolunteers')} value={activeVolunteersCount} />
         <KPI
           icon={<UserCheck className="w-5 h-5" />}
-          label="Member Volunteers"
+          label={t('kpis.memberVolunteers')}
           value={memberVolunteersCount}
           sub={`${((memberVolunteersCount / Math.max(activeVolunteersCount, 1)) * 100).toFixed(1)}%`}
         />
         <KPI
           icon={<Sparkles className="w-5 h-5" />}
-          label="Avg Hours / Active"
+          label={t('kpis.avgHours')}
           value={(totalHours / Math.max(activeVolunteersCount, 1)).toFixed(1)}
         />
       </div>
@@ -76,10 +85,10 @@ export default function App() {
       <div className="max-w-7xl mx-auto px-4 py-6">
         <div className="inline-flex rounded-2xl border bg-white overflow-hidden text-sm">
           {[
-            ["overview", "Overview"],
-            ["branches", "Branch Breakdown"],
-            ["people", "People & Badges"],
-            ["passport", "Belonging Passport"],
+            ["overview", t('tabs.overview')],
+            ["branches", t('tabs.branches')],
+            ["people", t('tabs.people')],
+            ["passport", t('tabs.passport')],
           ].map(([id, label]) => (
             <button
               key={id}
@@ -116,7 +125,7 @@ export default function App() {
       </div>
 
       <footer className="max-w-7xl mx-auto px-4 py-10 text-xs text-neutral-500">
-        Built for YMCA Cincinnati — Hackathon: Platform for Belonging. Upload VolunteerMatters CSV/JSON above to power the dashboard.
+        {t('footer.text')}
       </footer>
     </div>
   );

@@ -1,0 +1,41 @@
+{
+  "welcome": {
+    "title": "YMCA Volunteer Recognition",
+    "subtitle": "Belonging by Design",
+    "subtitleEmphasis": "Building the Platform for Community",
+    "story": "Powered by volunteers who strengthen intergenerational ties, improve mental health, and create employment pipelines. Belonging is a public health issue – loneliness equals smoking 15 cigarettes a day. Together, we're tracking belonging and impact at scale.",
+    "searchHint": "↓ Search for a volunteer below ↓"
+  },
+  "milestones": {
+    "hours": "Hours",
+    "tshirt": "(T-Shirt)",
+    "glassStar": "(Glass Star)"
+  },
+  "search": {
+    "placeholder": "Type volunteer name to reveal their card...",
+    "button": "🔍",
+    "enterName": "Please enter a name",
+    "notFound": "Volunteer not found. Try \"Richard Bowman\" or \"Christina Burke\"",
+    "serverError": "Server error - make sure backend is running on port 8080"
+  },
+  "badge": {
+    "hours": "Hours Volunteered",
+    "since": "Since",
+    "tier": "Tier",
+    "basic": "Basic",
+    "bronze": "Bronze",
+    "silver": "Silver", 
+    "gold": "Gold",
+    "diamond": "Diamond",
+    "legendary": "Legendary",
+    "special": "Special"
+  },
+  "languageSelector": {
+    "label": "Language",
+    "english": "English",
+    "spanish": "Español",
+    "french": "Français",
+    "german": "Deutsch",
+    "chinese": "中文"
+  }
+}

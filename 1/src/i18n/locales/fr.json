@@ -1,0 +1,56 @@
+{
+  "header": {
+    "title": "Tableau de Bord des Bénévoles YMCA",
+    "subtitle": "Appartenance par Design — alimenté par les données VolunteerMatters",
+    "exportRaw": "Exporter les Données"
+  },
+  "controls": {
+    "branch": "Succursale",
+    "search": "Rechercher",
+    "searchPlaceholder": "Trouver nom, succursale, date…"
+  },
+  "kpis": {
+    "totalHours": "Heures Totales",
+    "activeVolunteers": "Bénévoles Actifs",
+    "memberVolunteers": "Bénévoles Membres",
+    "avgHours": "Moy. Heures / Actif"
+  },
+  "tabs": {
+    "overview": "Aperçu",
+    "branches": "Répartition par Succursale",
+    "people": "Personnes et Badges",
+    "passport": "Passeport d'Appartenance"
+  },
+  "overview": {
+    "hoursDistribution": "Distribution des Heures par Succursale",
+    "monthlyTrend": "Tendance Mensuelle",
+    "exportHours": "Exporter Données d'Heures"
+  },
+  "branches": {
+    "activesByBranch": "Bénévoles Actifs par Succursale",
+    "memberShare": "Part des Membres par Succursale",
+    "exportActives": "Exporter Données des Actifs",
+    "exportMemberShare": "Exporter Part des Membres"
+  },
+  "people": {
+    "leaderboard": "Classement",
+    "badgeDistribution": "Distribution des Badges",
+    "hoursLabel": "heures",
+    "volunteers": "bénévoles"
+  },
+  "passport": {
+    "comingSoon": "À Venir",
+    "description": "Les fonctionnalités du Passeport d'Appartenance aideront à suivre et célébrer l'engagement des bénévoles dans différentes activités et programmes."
+  },
+  "footer": {
+    "text": "Construit pour YMCA Cincinnati — Hackathon : Plateforme pour l'Appartenance. Téléchargez CSV/JSON VolunteerMatters ci-dessus pour alimenter le tableau de bord."
+  },
+  "languageSelector": {
+    "label": "Langue",
+    "english": "English",
+    "spanish": "Español",
+    "french": "Français",
+    "german": "Deutsch",
+    "chinese": "中文"
+  }
+}
