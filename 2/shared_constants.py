@@ -121,3 +121,39 @@ def compute_milestones(total_hours: float) -> List[str]:
         if total_hours >= threshold:
             unlocked.append(label)
     return unlocked
+
+# Streak configurations
+STREAK_TYPES = {
+    "weekly": {
+        "name": "Weekly Streak",
+        "description": "Volunteer at least once per week",
+        "period_days": 7,
+        "grace_days": 2,  # Can miss up to 2 days past the week
+        "min_hours_per_period": 1.0,
+    },
+    "monthly": {
+        "name": "Monthly Streak", 
+        "description": "Volunteer at least once per month",
+        "period_days": 30,
+        "grace_days": 7,  # Can miss up to 7 days past the month
+        "min_hours_per_period": 2.0,
+    }
+}
+
+# Streak milestone rewards
+STREAK_MILESTONES = [
+    (2, "Streak Starter", "Started building consistency"),
+    (4, "Consistent Contributor", "One month of consistency"),
+    (8, "Streak Champion", "Two months strong"),
+    (12, "Dedicated Streaker", "Three months of commitment"),
+    (24, "Streak Master", "Six months of unwavering dedication"),
+    (52, "Legendary Streaker", "One year of consistent service")
+]
+
+def compute_streak_milestones(streak_count: int) -> List[str]:
+    """Compute unlocked streak milestones for given streak count."""
+    unlocked = []
+    for threshold, label, _ in STREAK_MILESTONES:
+        if streak_count >= threshold:
+            unlocked.append(label)
+    return unlocked
