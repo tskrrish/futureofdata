@@ -3,6 +3,7 @@ import { Users, Clock, UserCheck, Sparkles } from "lucide-react";
 
 import { SAMPLE_DATA } from "./data/sampleData";
 import { exportCSV } from "./utils/csvUtils";
+import { exportToBoardPDF } from "./utils/pdfExport";
 import { useVolunteerData } from "./hooks/useVolunteerData";
 import { useFileUpload } from "./hooks/useFileUpload";
 
@@ -19,6 +20,7 @@ export default function App() {
   const [branchFilter, setBranchFilter] = useState("All");
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState("overview");
+  const [isGeneratingPDF, setIsGeneratingPDF] = useState(false);
 
   const {
     branches,
@@ -31,7 +33,10 @@ export default function App() {
     memberShareByBranch,
     trendByMonth,
     leaderboard,
-    badges
+    badges,
+    ydeStats,
+    insights,
+    enhancedKPIs
   } = useVolunteerData(raw, branchFilter, search);
 
   const handleFile = useFileUpload(setRaw);
@@ -43,9 +48,39 @@ export default function App() {
     rawCurrentView: () => exportCSV("raw_current_view.csv", filtered),
   };
 
+  const handleBoardPDFExport = async () => {
+    setIsGeneratingPDF(true);
+    try {
+      await exportToBoardPDF({
+        totalHours,
+        activeVolunteersCount,
+        memberVolunteersCount,
+        hoursByBranch,
+        activesByBranch,
+        memberShareByBranch,
+        trendByMonth,
+        leaderboard,
+        badges,
+        ydeStats,
+        insights,
+        enhancedKPIs
+      });
+    } catch (error) {
+      console.error('PDF export failed:', error);
+      alert('Failed to generate PDF report. Please try again.');
+    } finally {
+      setIsGeneratingPDF(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-neutral-50">
-      <Header onFileUpload={handleFile} onExportRaw={exportHandlers.rawCurrentView} />
+      <Header 
+        onFileUpload={handleFile} 
+        onExportRaw={exportHandlers.rawCurrentView} 
+        onExportBoardPDF={handleBoardPDFExport}
+        isGeneratingPDF={isGeneratingPDF}
+      />
       
       <Controls
         branches={branches}
@@ -96,6 +131,8 @@ export default function App() {
             hoursByBranch={hoursByBranch} 
             trendByMonth={trendByMonth} 
             onExportHours={exportHandlers.hoursByBranch}
+            onExportBoardPDF={handleBoardPDFExport}
+            isGeneratingPDF={isGeneratingPDF}
           />
         )}
 

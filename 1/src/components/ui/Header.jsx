@@ -1,6 +1,6 @@
-import { Download } from "lucide-react";
+import { Download, FileText, Loader2 } from "lucide-react";
 
-export function Header({ onFileUpload, onExportRaw }) {
+export function Header({ onFileUpload, onExportRaw, onExportBoardPDF, isGeneratingPDF }) {
   return (
     <header className="sticky top-0 z-10 bg-white/80 backdrop-blur border-b">
       <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
@@ -24,6 +24,23 @@ export function Header({ onFileUpload, onExportRaw }) {
             className="inline-flex items-center gap-2 rounded-xl border px-3 py-1.5 text-sm hover:bg-neutral-50"
           >
             <Download className="w-4 h-4" /> Export Raw
+          </button>
+          <button
+            onClick={onExportBoardPDF}
+            disabled={isGeneratingPDF}
+            className="inline-flex items-center gap-2 rounded-xl border px-3 py-1.5 text-sm bg-red-600 text-white hover:bg-red-700 font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isGeneratingPDF ? (
+              <>
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Generating...
+              </>
+            ) : (
+              <>
+                <FileText className="w-4 h-4" />
+                Board Report PDF
+              </>
+            )}
           </button>
         </div>
       </div>
