@@ -14,6 +14,7 @@ import { OverviewTab } from "./components/tabs/OverviewTab";
 import { BranchesTab } from "./components/tabs/BranchesTab";
 import { PeopleTab } from "./components/tabs/PeopleTab";
 import { PassportTab } from "./components/tabs/PassportTab";
+import DashboardManager from "./components/DashboardManager";
 
 
 export default function App() {
@@ -21,6 +22,8 @@ export default function App() {
   const [branchFilter, setBranchFilter] = useState("All");
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState("overview");
+  const [showDashboardManager, setShowDashboardManager] = useState(false);
+  const [currentDashboard, setCurrentDashboard] = useState(null);
 
   // Telemetry and feature flags
   const { trackUserAction } = useTelemetry();
@@ -104,17 +107,67 @@ export default function App() {
     },
   };
 
+  // Dashboard management functions
+  const getCurrentDashboardState = () => ({
+    raw,
+    branchFilter,
+    search,
+    tab,
+    timestamp: new Date().toISOString()
+  });
+
+  const handleLoadDashboard = (dashboardData) => {
+    if (dashboardData.raw) setRaw(dashboardData.raw);
+    if (dashboardData.branchFilter) setBranchFilter(dashboardData.branchFilter);
+    if (dashboardData.search) setSearch(dashboardData.search);
+    if (dashboardData.tab) setTab(dashboardData.tab);
+  };
+
+  const handleSaveDashboard = (dashboard) => {
+    setCurrentDashboard(dashboard);
+  };
+
+  // Check if user has edit permissions for current dashboard
+  const canEditDashboard = () => {
+    if (!currentDashboard) return true; // No dashboard loaded, full access
+    const permission = currentDashboard.permission;
+    return permission === 'owner' || permission === 'edit';
+  };
+
   return (
     <div className="min-h-screen bg-neutral-50">
       <Header onFileUpload={handleFile} onExportRaw={exportHandlers.rawCurrentView} />
       
+      {/* Dashboard Management Bar */}
+      <div className="max-w-7xl mx-auto px-4 py-2">
+        <div className="flex items-center justify-between bg-white rounded-lg border p-3">
+          <div className="flex items-center space-x-4">
+            {currentDashboard && (
+              <div className="text-sm">
+                <span className="font-medium text-gray-900">{currentDashboard.title}</span>
+                <span className="text-gray-500 ml-2">
+                  ({currentDashboard.permission === 'owner' ? 'Owner' : 
+                    currentDashboard.permission === 'edit' ? 'Editor' : 'Viewer'})
+                </span>
+              </div>
+            )}
+          </div>
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={() => setShowDashboardManager(true)}
+              className="flex items-center space-x-2 px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 text-sm"
+            >
+              <Save className="w-4 h-4" />
+              <span>Dashboard Manager</span>
+            </button>
+          </div>
+        </div>
+      </div>
+      
       <Controls
         branches={branches}
         branchFilter={branchFilter}
-        onBranchChange={handleBranchFilterChange}
-        search={search}
-        onSearchChange={handleSearchChange}
-        showAdvancedFiltering={advancedFiltering}
+
       />
 
       {/* KPI Cards */}
@@ -203,8 +256,7 @@ export default function App() {
         Built for YMCA Cincinnati — Hackathon: Platform for Belonging. Upload VolunteerMatters CSV/JSON above to power the dashboard.
       </footer>
 
-      {/* Feature Flag Admin Panel */}
-      <FeatureFlagPanel />
+
     </div>
   );
 }
