@@ -158,8 +158,57 @@ class VolunteerDatabase:
         );
         """
         
+        # E-Sign Vault tables
+        esign_documents_sql = """
+        CREATE TABLE IF NOT EXISTS esign_documents (
+            id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+            user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+            document_name VARCHAR(255) NOT NULL,
+            document_type VARCHAR(100), -- 'waiver', 'certification', 'background_check', etc.
+            file_url TEXT,
+            file_hash VARCHAR(255), -- For integrity verification
+            file_size INTEGER,
+            mime_type VARCHAR(100),
+            status VARCHAR(50) DEFAULT 'active', -- 'active', 'expired', 'revoked'
+            signed_date TIMESTAMP WITH TIME ZONE,
+            expiry_date TIMESTAMP WITH TIME ZONE,
+            renewal_required BOOLEAN DEFAULT FALSE,
+            metadata JSONB, -- Additional document metadata
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+        """
+        
+        renewal_alerts_sql = """
+        CREATE TABLE IF NOT EXISTS renewal_alerts (
+            id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+            document_id UUID REFERENCES esign_documents(id) ON DELETE CASCADE,
+            user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+            alert_type VARCHAR(50), -- 'email', 'sms', 'in_app'
+            alert_date TIMESTAMP WITH TIME ZONE,
+            days_before_expiry INTEGER,
+            status VARCHAR(50) DEFAULT 'pending', -- 'pending', 'sent', 'failed'
+            message_content TEXT,
+            sent_at TIMESTAMP WITH TIME ZONE,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+        """
+        
+        document_audit_log_sql = """
+        CREATE TABLE IF NOT EXISTS document_audit_log (
+            id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+            document_id UUID REFERENCES esign_documents(id) ON DELETE CASCADE,
+            user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+            action VARCHAR(100), -- 'uploaded', 'viewed', 'downloaded', 'signed', 'expired', 'renewed'
+            details JSONB,
+            ip_address INET,
+            user_agent TEXT,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+        """
+        
         # Execute table creation (Note: In production, use proper migrations)
-        tables = [users_sql, preferences_sql, conversations_sql, messages_sql, matches_sql, feedback_sql, analytics_sql]
+        tables = [users_sql, preferences_sql, conversations_sql, messages_sql, matches_sql, feedback_sql, analytics_sql, esign_documents_sql, renewal_alerts_sql, document_audit_log_sql]
         
         print("🗄️  Setting up database tables...")
         for sql in tables:
@@ -495,6 +544,226 @@ class VolunteerDatabase:
             return result.data
         except Exception as e:
             print(f"❌ Error getting popular matches: {e}")
+            return []
+    
+    # E-Sign Vault Methods
+    async def store_document(self, user_id: str, document_data: Dict[str, Any]) -> Optional[str]:
+        """Store a signed document in the vault"""
+        try:
+            document_record = {
+                'user_id': user_id,
+                'document_name': document_data.get('name', ''),
+                'document_type': document_data.get('type', ''),
+                'file_url': document_data.get('file_url', ''),
+                'file_hash': document_data.get('file_hash', ''),
+                'file_size': document_data.get('file_size', 0),
+                'mime_type': document_data.get('mime_type', ''),
+                'status': document_data.get('status', 'active'),
+                'signed_date': document_data.get('signed_date'),
+                'expiry_date': document_data.get('expiry_date'),
+                'renewal_required': document_data.get('renewal_required', False),
+                'metadata': json.dumps(document_data.get('metadata', {})),
+                'created_at': datetime.now().isoformat(),
+                'updated_at': datetime.now().isoformat()
+            }
+            
+            result = self.supabase.table('esign_documents').insert(document_record).execute()
+            if result.data and len(result.data) > 0:
+                # Log the action
+                await self.log_document_action(
+                    result.data[0]['id'], 
+                    user_id, 
+                    'uploaded', 
+                    {'document_name': document_data.get('name', '')}
+                )
+                return result.data[0]['id']
+            return None
+        except Exception as e:
+            print(f"❌ Error storing document: {e}")
+            return None
+    
+    async def get_user_documents(self, user_id: str, document_type: str = None) -> List[Dict[str, Any]]:
+        """Get all documents for a user"""
+        try:
+            query = self.supabase.table('esign_documents').select('*').eq('user_id', user_id)
+            
+            if document_type:
+                query = query.eq('document_type', document_type)
+            
+            result = query.order('created_at', desc=True).execute()
+            
+            documents = []
+            for doc in result.data:
+                if doc.get('metadata'):
+                    doc['metadata'] = json.loads(doc['metadata'])
+                documents.append(doc)
+            
+            return documents
+        except Exception as e:
+            print(f"❌ Error getting documents: {e}")
+            return []
+    
+    async def get_document_by_id(self, document_id: str, user_id: str = None) -> Optional[Dict[str, Any]]:
+        """Get a specific document by ID"""
+        try:
+            query = self.supabase.table('esign_documents').select('*').eq('id', document_id)
+            
+            if user_id:
+                query = query.eq('user_id', user_id)
+            
+            result = query.execute()
+            if result.data:
+                doc = result.data[0]
+                if doc.get('metadata'):
+                    doc['metadata'] = json.loads(doc['metadata'])
+                
+                # Log access
+                if user_id:
+                    await self.log_document_action(document_id, user_id, 'viewed')
+                
+                return doc
+            return None
+        except Exception as e:
+            print(f"❌ Error getting document: {e}")
+            return None
+    
+    async def update_document_status(self, document_id: str, status: str, user_id: str = None) -> bool:
+        """Update document status"""
+        try:
+            updates = {
+                'status': status,
+                'updated_at': datetime.now().isoformat()
+            }
+            
+            result = self.supabase.table('esign_documents')\
+                .update(updates)\
+                .eq('id', document_id)\
+                .execute()
+            
+            if result.data and user_id:
+                await self.log_document_action(document_id, user_id, status, {'new_status': status})
+            
+            return len(result.data) > 0
+        except Exception as e:
+            print(f"❌ Error updating document status: {e}")
+            return False
+    
+    async def get_expiring_documents(self, days_ahead: int = 30) -> List[Dict[str, Any]]:
+        """Get documents expiring within specified days"""
+        try:
+            expiry_date = (datetime.now() + timedelta(days=days_ahead)).isoformat()
+            current_date = datetime.now().isoformat()
+            
+            result = self.supabase.table('esign_documents')\
+                .select('*, users(first_name, last_name, email)')\
+                .eq('status', 'active')\
+                .gte('expiry_date', current_date)\
+                .lte('expiry_date', expiry_date)\
+                .execute()
+            
+            return result.data
+        except Exception as e:
+            print(f"❌ Error getting expiring documents: {e}")
+            return []
+    
+    async def create_renewal_alert(self, document_id: str, user_id: str, alert_data: Dict[str, Any]) -> bool:
+        """Create a renewal alert"""
+        try:
+            alert_record = {
+                'document_id': document_id,
+                'user_id': user_id,
+                'alert_type': alert_data.get('type', 'email'),
+                'alert_date': alert_data.get('alert_date'),
+                'days_before_expiry': alert_data.get('days_before', 30),
+                'status': 'pending',
+                'message_content': alert_data.get('message', ''),
+                'created_at': datetime.now().isoformat()
+            }
+            
+            result = self.supabase.table('renewal_alerts').insert(alert_record).execute()
+            return len(result.data) > 0
+        except Exception as e:
+            print(f"❌ Error creating renewal alert: {e}")
+            return False
+    
+    async def get_pending_alerts(self) -> List[Dict[str, Any]]:
+        """Get pending renewal alerts"""
+        try:
+            current_date = datetime.now().isoformat()
+            
+            result = self.supabase.table('renewal_alerts')\
+                .select('*, esign_documents(document_name, document_type), users(first_name, last_name, email)')\
+                .eq('status', 'pending')\
+                .lte('alert_date', current_date)\
+                .execute()
+            
+            return result.data
+        except Exception as e:
+            print(f"❌ Error getting pending alerts: {e}")
+            return []
+    
+    async def mark_alert_sent(self, alert_id: str) -> bool:
+        """Mark an alert as sent"""
+        try:
+            updates = {
+                'status': 'sent',
+                'sent_at': datetime.now().isoformat()
+            }
+            
+            result = self.supabase.table('renewal_alerts')\
+                .update(updates)\
+                .eq('id', alert_id)\
+                .execute()
+            
+            return len(result.data) > 0
+        except Exception as e:
+            print(f"❌ Error marking alert as sent: {e}")
+            return False
+    
+    async def log_document_action(self, document_id: str, user_id: str, action: str, 
+                                details: Dict[str, Any] = None, ip_address: str = None, 
+                                user_agent: str = None) -> bool:
+        """Log document action for audit trail"""
+        try:
+            log_record = {
+                'document_id': document_id,
+                'user_id': user_id,
+                'action': action,
+                'details': json.dumps(details or {}),
+                'ip_address': ip_address,
+                'user_agent': user_agent,
+                'created_at': datetime.now().isoformat()
+            }
+            
+            result = self.supabase.table('document_audit_log').insert(log_record).execute()
+            return len(result.data) > 0
+        except Exception as e:
+            print(f"❌ Error logging document action: {e}")
+            return False
+    
+    async def get_document_audit_log(self, document_id: str = None, user_id: str = None, 
+                                   limit: int = 50) -> List[Dict[str, Any]]:
+        """Get document audit log"""
+        try:
+            query = self.supabase.table('document_audit_log')\
+                .select('*, users(first_name, last_name, email), esign_documents(document_name)')
+            
+            if document_id:
+                query = query.eq('document_id', document_id)
+            if user_id:
+                query = query.eq('user_id', user_id)
+            
+            result = query.order('created_at', desc=True).limit(limit).execute()
+            
+            logs = []
+            for log in result.data:
+                if log.get('details'):
+                    log['details'] = json.loads(log['details'])
+                logs.append(log)
+            
+            return logs
+        except Exception as e:
+            print(f"❌ Error getting audit log: {e}")
             return []
     
     # Data Export

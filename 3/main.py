@@ -10,9 +10,10 @@ from pydantic import BaseModel
 from typing import Dict, List, Optional, Any
 import uvicorn
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 import pandas as pd
+import logging
 
 # Import our modules
 from config import settings
@@ -20,6 +21,8 @@ from ai_assistant import VolunteerAIAssistant
 from matching_engine import VolunteerMatchingEngine
 from data_processor import VolunteerDataProcessor
 from database import VolunteerDatabase
+from esign_vault import ESignVaultService
+from renewal_alerts import RenewalAlertService
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -41,8 +44,13 @@ app.add_middleware(
 # Global instances
 ai_assistant = VolunteerAIAssistant()
 database = VolunteerDatabase()
+esign_vault = ESignVaultService()
+renewal_alerts = RenewalAlertService()
 volunteer_data = None
 matching_engine = None
+
+# Setup logging
+logger = logging.getLogger(__name__)
 
 # Pydantic models
 class UserProfile(BaseModel):
@@ -77,6 +85,23 @@ class FeedbackData(BaseModel):
     rating: Optional[int] = None
     feedback_text: str = ""
     feedback_type: str = "general"
+
+# E-Sign Vault Models
+class DocumentUpload(BaseModel):
+    name: str
+    type: str  # 'waiver', 'certification', 'background_check', etc.
+    expiry_date: Optional[str] = None
+    renewal_required: bool = False
+    metadata: Optional[Dict[str, Any]] = {}
+
+class DocumentStatusUpdate(BaseModel):
+    status: str  # 'active', 'expired', 'revoked'
+
+class RenewalAlert(BaseModel):
+    document_id: str
+    alert_type: str = "email"  # 'email', 'sms', 'in_app'
+    days_before_expiry: int = 30
+    message: Optional[str] = None
 
 # Initialize data on startup
 @app.on_event("startup")
@@ -677,6 +702,364 @@ async def get_resources() -> JSONResponse:
     }
     
     return JSONResponse(content=resources)
+
+# E-Sign Vault Endpoints
+@app.post("/api/vault/upload")
+async def upload_document(
+    document_data: DocumentUpload,
+    file_content: bytes = None,
+    user_id: str = None,
+    background_tasks: BackgroundTasks = None
+) -> JSONResponse:
+    """Upload a document to the secure vault"""
+    try:
+        if not user_id:
+            raise HTTPException(status_code=400, detail="User ID is required")
+        
+        if not file_content:
+            raise HTTPException(status_code=400, detail="File content is required")
+        
+        # Store document
+        document_id = await esign_vault.store_document(
+            user_id=user_id,
+            file_content=file_content,
+            document_data=document_data.dict()
+        )
+        
+        if document_id:
+            # Track upload event
+            if background_tasks:
+                background_tasks.add_task(
+                    database.track_event,
+                    "document_uploaded",
+                    {
+                        "document_type": document_data.type,
+                        "document_name": document_data.name,
+                        "has_expiry": document_data.expiry_date is not None
+                    },
+                    user_id
+                )
+            
+            return JSONResponse(content={
+                "success": True,
+                "document_id": document_id,
+                "message": "Document uploaded successfully"
+            })
+        else:
+            raise HTTPException(status_code=500, detail="Failed to store document")
+    
+    except Exception as e:
+        logger.error(f"Error uploading document: {e}")
+        raise HTTPException(status_code=500, detail="Document upload failed")
+
+@app.get("/api/vault/documents/{user_id}")
+async def get_user_documents(
+    user_id: str,
+    document_type: Optional[str] = None,
+    include_expired: bool = False
+) -> JSONResponse:
+    """Get all documents for a user"""
+    try:
+        documents = await esign_vault.get_user_documents(
+            user_id=user_id,
+            include_expired=include_expired
+        )
+        
+        # Filter by document type if specified
+        if document_type:
+            documents = [doc for doc in documents if doc.get('document_type') == document_type]
+        
+        return JSONResponse(content={
+            "success": True,
+            "documents": documents,
+            "count": len(documents)
+        })
+    
+    except Exception as e:
+        logger.error(f"Error getting user documents: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve documents")
+
+@app.get("/api/vault/document/{document_id}")
+async def get_document(
+    document_id: str,
+    user_id: str,
+    download: bool = False
+) -> JSONResponse:
+    """Get a specific document by ID"""
+    try:
+        if download:
+            # Return file for download
+            document = await esign_vault.retrieve_document(document_id, user_id)
+            if not document:
+                raise HTTPException(status_code=404, detail="Document not found")
+            
+            from fastapi.responses import Response
+            return Response(
+                content=document['content'],
+                media_type=document['mime_type'],
+                headers={
+                    "Content-Disposition": f"attachment; filename={document['metadata']['document_name']}"
+                }
+            )
+        else:
+            # Return document metadata only
+            doc_info = await database.get_document_by_id(document_id, user_id)
+            if not doc_info:
+                raise HTTPException(status_code=404, detail="Document not found")
+            
+            return JSONResponse(content={
+                "success": True,
+                "document": doc_info
+            })
+    
+    except Exception as e:
+        logger.error(f"Error getting document: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve document")
+
+@app.put("/api/vault/document/{document_id}/status")
+async def update_document_status(
+    document_id: str,
+    status_update: DocumentStatusUpdate,
+    user_id: str,
+    background_tasks: BackgroundTasks = None
+) -> JSONResponse:
+    """Update document status"""
+    try:
+        success = await esign_vault.update_document_status(
+            document_id=document_id,
+            status=status_update.status,
+            user_id=user_id
+        )
+        
+        if success:
+            # Track status update
+            if background_tasks:
+                background_tasks.add_task(
+                    database.track_event,
+                    "document_status_updated",
+                    {
+                        "document_id": document_id,
+                        "new_status": status_update.status
+                    },
+                    user_id
+                )
+            
+            return JSONResponse(content={
+                "success": True,
+                "message": f"Document status updated to {status_update.status}"
+            })
+        else:
+            raise HTTPException(status_code=500, detail="Failed to update document status")
+    
+    except Exception as e:
+        logger.error(f"Error updating document status: {e}")
+        raise HTTPException(status_code=500, detail="Status update failed")
+
+@app.delete("/api/vault/document/{document_id}")
+async def delete_document(
+    document_id: str,
+    user_id: str,
+    background_tasks: BackgroundTasks = None
+) -> JSONResponse:
+    """Delete a document from the vault"""
+    try:
+        success = await esign_vault.delete_document(document_id, user_id)
+        
+        if success:
+            # Track deletion
+            if background_tasks:
+                background_tasks.add_task(
+                    database.track_event,
+                    "document_deleted",
+                    {"document_id": document_id},
+                    user_id
+                )
+            
+            return JSONResponse(content={
+                "success": True,
+                "message": "Document deleted successfully"
+            })
+        else:
+            raise HTTPException(status_code=404, detail="Document not found or deletion failed")
+    
+    except Exception as e:
+        logger.error(f"Error deleting document: {e}")
+        raise HTTPException(status_code=500, detail="Document deletion failed")
+
+@app.get("/api/vault/expiring")
+async def get_expiring_documents(
+    days_ahead: int = 30,
+    user_id: Optional[str] = None
+) -> JSONResponse:
+    """Get documents expiring within specified days"""
+    try:
+        if user_id:
+            # Get expiring documents for specific user
+            user_documents = await esign_vault.get_user_documents(user_id, include_expired=False)
+            expiring_docs = [
+                doc for doc in user_documents
+                if doc.get('days_until_expiry') is not None and doc['days_until_expiry'] <= days_ahead
+            ]
+            
+            return JSONResponse(content={
+                "success": True,
+                "expiring_documents": expiring_docs,
+                "count": len(expiring_docs)
+            })
+        else:
+            # Get system-wide summary (admin function)
+            summary = await esign_vault.get_expiring_documents_summary(days_ahead)
+            
+            return JSONResponse(content={
+                "success": True,
+                "summary": summary
+            })
+    
+    except Exception as e:
+        logger.error(f"Error getting expiring documents: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve expiring documents")
+
+@app.post("/api/vault/renewal-alert")
+async def create_renewal_alert(
+    alert_data: RenewalAlert,
+    user_id: str,
+    background_tasks: BackgroundTasks = None
+) -> JSONResponse:
+    """Create a renewal alert for a document"""
+    try:
+        # Get document info to calculate alert date
+        doc_info = await database.get_document_by_id(alert_data.document_id, user_id)
+        if not doc_info or not doc_info.get('expiry_date'):
+            raise HTTPException(status_code=400, detail="Document not found or has no expiry date")
+        
+        expiry_date = datetime.fromisoformat(doc_info['expiry_date'].replace('Z', '+00:00'))
+        alert_date = expiry_date - timedelta(days=alert_data.days_before_expiry)
+        
+        alert_request = {
+            'type': alert_data.alert_type,
+            'alert_date': alert_date.isoformat(),
+            'days_before': alert_data.days_before_expiry,
+            'message': alert_data.message or f'Your document expires in {alert_data.days_before_expiry} days.'
+        }
+        
+        success = await database.create_renewal_alert(
+            alert_data.document_id,
+            user_id,
+            alert_request
+        )
+        
+        if success:
+            # Track alert creation
+            if background_tasks:
+                background_tasks.add_task(
+                    database.track_event,
+                    "renewal_alert_created",
+                    {
+                        "document_id": alert_data.document_id,
+                        "alert_type": alert_data.alert_type,
+                        "days_before": alert_data.days_before_expiry
+                    },
+                    user_id
+                )
+            
+            return JSONResponse(content={
+                "success": True,
+                "message": f"Renewal alert scheduled for {alert_data.days_before_expiry} days before expiry"
+            })
+        else:
+            raise HTTPException(status_code=500, detail="Failed to create renewal alert")
+    
+    except Exception as e:
+        logger.error(f"Error creating renewal alert: {e}")
+        raise HTTPException(status_code=500, detail="Alert creation failed")
+
+@app.get("/api/vault/audit-log")
+async def get_audit_log(
+    document_id: Optional[str] = None,
+    user_id: Optional[str] = None,
+    limit: int = 50
+) -> JSONResponse:
+    """Get document audit log"""
+    try:
+        audit_logs = await database.get_document_audit_log(
+            document_id=document_id,
+            user_id=user_id,
+            limit=limit
+        )
+        
+        return JSONResponse(content={
+            "success": True,
+            "audit_logs": audit_logs,
+            "count": len(audit_logs)
+        })
+    
+    except Exception as e:
+        logger.error(f"Error getting audit log: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve audit log")
+
+@app.post("/api/vault/process-alerts")
+async def process_renewal_alerts(background_tasks: BackgroundTasks = None) -> JSONResponse:
+    """Process pending renewal alerts (admin function)"""
+    try:
+        if background_tasks:
+            # Run in background
+            background_tasks.add_task(renewal_alerts.process_pending_alerts)
+            return JSONResponse(content={
+                "success": True,
+                "message": "Alert processing started in background"
+            })
+        else:
+            # Run synchronously
+            results = await renewal_alerts.process_pending_alerts()
+            return JSONResponse(content={
+                "success": True,
+                "results": results
+            })
+    
+    except Exception as e:
+        logger.error(f"Error processing alerts: {e}")
+        raise HTTPException(status_code=500, detail="Alert processing failed")
+
+@app.get("/api/vault/dashboard")
+async def get_vault_dashboard(user_id: Optional[str] = None) -> JSONResponse:
+    """Get vault dashboard data"""
+    try:
+        if user_id:
+            # User-specific dashboard
+            documents = await esign_vault.get_user_documents(user_id, include_expired=True)
+            
+            dashboard_data = {
+                "total_documents": len(documents),
+                "active_documents": len([d for d in documents if d.get('status') == 'active']),
+                "expiring_soon": len([d for d in documents if d.get('days_until_expiry') and d['days_until_expiry'] <= 30]),
+                "expired_documents": len([d for d in documents if d.get('is_expired')]),
+                "documents_by_type": {},
+                "recent_activity": await database.get_document_audit_log(user_id=user_id, limit=10)
+            }
+            
+            # Group by document type
+            for doc in documents:
+                doc_type = doc.get('document_type', 'unknown')
+                dashboard_data['documents_by_type'][doc_type] = dashboard_data['documents_by_type'].get(doc_type, 0) + 1
+        
+        else:
+            # System-wide dashboard (admin)
+            expiring_summary = await esign_vault.get_expiring_documents_summary(30)
+            recent_activity = await database.get_document_audit_log(limit=20)
+            
+            dashboard_data = {
+                "system_summary": expiring_summary,
+                "recent_activity": recent_activity
+            }
+        
+        return JSONResponse(content={
+            "success": True,
+            "dashboard": dashboard_data
+        })
+    
+    except Exception as e:
+        logger.error(f"Error getting dashboard data: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve dashboard data")
 
 # Main web interface
 @app.get("/", response_class=HTMLResponse)
