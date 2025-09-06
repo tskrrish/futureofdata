@@ -1,4 +1,5 @@
 import { Download } from "lucide-react";
+import AnnouncementNotification from "../announcements/AnnouncementNotification";
 
 export function Header({ onFileUpload, onExportRaw }) {
   return (
@@ -12,6 +13,7 @@ export function Header({ onFileUpload, onExportRaw }) {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <AnnouncementNotification />
           <input
             id="file"
             type="file"
