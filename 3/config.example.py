@@ -27,6 +27,10 @@ class Settings:
     VOLUNTEER_INTEREST_FORM: str = 'https://ymcacincinnati.qualtrics.com/jfe/form/SV_0JklTjQEJTQmS2i'
 
     VOLUNTEER_DATA_PATH: str = 'Y Volunteer Raw Data - Jan- August 2025.xlsx'
+    
+    # Google Calendar Integration
+    BASE_URL: str = os.getenv('BASE_URL', 'http://localhost:8000')
+    GOOGLE_CREDENTIALS_PATH: str = 'google_credentials.json'
 
     # QuickBooks Integration
     QUICKBOOKS_CLIENT_ID: str = os.getenv('QUICKBOOKS_CLIENT_ID', '')

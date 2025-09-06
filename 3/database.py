@@ -191,93 +191,13 @@ class VolunteerDatabase:
             created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
         );
         """
-        
-        # Task assignments table
-        tasks_sql = """
-        CREATE TABLE IF NOT EXISTS tasks (
-            id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-            title VARCHAR(200) NOT NULL,
-            description TEXT,
-            priority INTEGER DEFAULT 2, -- 1=low, 2=medium, 3=high, 4=urgent
-            status VARCHAR(20) DEFAULT 'pending', -- 'pending', 'in_progress', 'completed', 'cancelled'
-            project_id INTEGER,
-            category VARCHAR(100),
-            estimated_hours DECIMAL(4,2),
-            created_by UUID REFERENCES users(id),
-            assigned_to UUID REFERENCES users(id),
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-            completed_at TIMESTAMP WITH TIME ZONE,
-            
-            -- Event-driven deadline fields
-            deadline_type VARCHAR(20) DEFAULT 'fixed', -- 'fixed', 'event_based', 'flexible'
-            fixed_deadline TIMESTAMP WITH TIME ZONE,
-            event_trigger VARCHAR(100), -- e.g., 'volunteer_signup', 'project_start', 'event_date'
-            deadline_offset_days INTEGER DEFAULT 0, -- Days relative to event trigger
-            deadline_calculated TIMESTAMP WITH TIME ZONE, -- Computed deadline based on event
-            
-            -- Task metadata
-            task_data JSONB,
-            dependencies JSONB, -- Array of task IDs this task depends on
-            tags JSONB -- Array of tags for categorization
-        );
-        """
-        
-        # Task assignments table (many-to-many relationship)
-        assignments_sql = """
-        CREATE TABLE IF NOT EXISTS task_assignments (
-            id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-            task_id UUID REFERENCES tasks(id) ON DELETE CASCADE,
-            user_id UUID REFERENCES users(id) ON DELETE CASCADE,
-            assigned_by UUID REFERENCES users(id),
-            assigned_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-            status VARCHAR(20) DEFAULT 'assigned', -- 'assigned', 'accepted', 'declined', 'completed'
-            progress_percentage INTEGER DEFAULT 0,
-            notes TEXT,
-            time_logged DECIMAL(4,2) DEFAULT 0.0,
-            last_updated TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-            
-            UNIQUE(task_id, user_id)
-        );
-        """
-        
-        # Events table for deadline triggers
-        deadline_events_sql = """
-        CREATE TABLE IF NOT EXISTS deadline_events (
-            id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-            event_name VARCHAR(100) UNIQUE NOT NULL, -- e.g., 'volunteer_signup', 'project_start'
-            event_date TIMESTAMP WITH TIME ZONE,
-            event_data JSONB,
-            is_active BOOLEAN DEFAULT true,
+ 
             created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
             updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
         );
         """
         
-        # Task deadline history for tracking changes
-        deadline_history_sql = """
-        CREATE TABLE IF NOT EXISTS task_deadline_history (
-            id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-            task_id UUID REFERENCES tasks(id) ON DELETE CASCADE,
-            old_deadline TIMESTAMP WITH TIME ZONE,
-            new_deadline TIMESTAMP WITH TIME ZONE,
-            change_reason VARCHAR(100), -- 'event_triggered', 'manual_update', 'dependency_change'
-            changed_by UUID REFERENCES users(id),
-            changed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-        );
-        """
-        
-        # Task notifications for deadline alerts
-        task_notifications_sql = """
-        CREATE TABLE IF NOT EXISTS task_notifications (
-            id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-            task_id UUID REFERENCES tasks(id) ON DELETE CASCADE,
-            user_id UUID REFERENCES users(id) ON DELETE CASCADE,
-            notification_type VARCHAR(50), -- 'deadline_approaching', 'overdue', 'assignment_new', 'status_change'
-            message TEXT,
-            is_read BOOLEAN DEFAULT false,
-            sent_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-            read_at TIMESTAMP WITH TIME ZONE
+
         );
         """
         
@@ -646,6 +566,7 @@ class VolunteerDatabase:
             }
             
 
+
     # Data Export
     async def export_volunteer_data(self) -> Dict[str, pd.DataFrame]:
         """Export all volunteer data for analysis"""
@@ -671,6 +592,20 @@ class VolunteerDatabase:
             # Feedback
             feedback_result = self.supabase.table('volunteer_feedback').select('*').execute()
             tables['feedback'] = pd.DataFrame(feedback_result.data)
+            
+            # Calendar data
+            try:
+                calendar_auth_result = self.supabase.table('google_calendar_auth').select('*').execute()
+                tables['calendar_auth'] = pd.DataFrame(calendar_auth_result.data)
+                
+                shifts_result = self.supabase.table('volunteer_shifts').select('*').execute()
+                tables['volunteer_shifts'] = pd.DataFrame(shifts_result.data)
+                
+                sync_log_result = self.supabase.table('calendar_sync_log').select('*').execute()
+                tables['calendar_sync_log'] = pd.DataFrame(sync_log_result.data)
+            except Exception:
+                # Calendar tables might not exist yet
+                pass
             
             print(f"📊 Exported data: {len(tables)} tables")
             return tables
