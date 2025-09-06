@@ -20,6 +20,9 @@ from ai_assistant import VolunteerAIAssistant
 from matching_engine import VolunteerMatchingEngine
 from data_processor import VolunteerDataProcessor
 from database import VolunteerDatabase
+from rbac_api import create_rbac_router
+from rbac_middleware import create_rbac_middleware
+from rbac_models import RBACService
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -43,6 +46,9 @@ ai_assistant = VolunteerAIAssistant()
 database = VolunteerDatabase()
 volunteer_data = None
 matching_engine = None
+rbac_middleware = None
+rbac_dependency = None
+rbac_service = None
 
 # Pydantic models
 class UserProfile(BaseModel):
@@ -82,7 +88,7 @@ class FeedbackData(BaseModel):
 @app.on_event("startup")
 async def startup_event():
     """Initialize application data and models"""
-    global volunteer_data, matching_engine
+    global volunteer_data, matching_engine, rbac_middleware, rbac_dependency, rbac_service
     
     print("🚀 Starting Volunteer PathFinder AI Assistant...")
     
@@ -92,6 +98,18 @@ async def startup_event():
         print("✅ Database initialized")
     except Exception as e:
         print(f"⚠️  Database initialization note: {e}")
+    
+    # Initialize RBAC system
+    try:
+        rbac_middleware, rbac_dependency = create_rbac_middleware(database)
+        rbac_service = RBACService(database)
+        
+        # Bootstrap system roles if needed
+        await rbac_service.bootstrap_system_roles()
+        
+        print("✅ RBAC system initialized")
+    except Exception as e:
+        print(f"⚠️  RBAC initialization error: {e}")
     
     # Load and process volunteer data
     try:
@@ -112,6 +130,14 @@ async def startup_event():
         print(f"❌ Error loading volunteer data: {e}")
     
     print("🎉 Volunteer PathFinder AI Assistant is ready!")
+    
+    # Include RBAC router
+    try:
+        rbac_router = create_rbac_router(database)
+        app.include_router(rbac_router)
+        print("✅ RBAC API endpoints registered")
+    except Exception as e:
+        print(f"⚠️  RBAC router error: {e}")
 
 @app.post("/api/reset")
 async def reset_context() -> JSONResponse:
