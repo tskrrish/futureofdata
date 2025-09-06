@@ -1,6 +1,7 @@
 """
-ML-Powered Volunteer Matching Engine
+ML-Powered Volunteer Matching Engine with Proximity-Based Matching
 Uses scikit-learn models with existing volunteer data patterns
+Enhanced with travel time and public transit aware scoring
 """
 import pandas as pd
 import numpy as np
@@ -12,6 +13,7 @@ from sklearn.ensemble import RandomForestClassifier
 from typing import Dict, List, Tuple, Any, Optional
 import re
 from collections import Counter
+from proximity_matcher import ProximityMatcher
 
 class VolunteerMatchingEngine:
     def __init__(self, volunteer_data: Dict[str, Any]):
@@ -29,6 +31,9 @@ class VolunteerMatchingEngine:
         
         # Fitted models flags
         self.models_trained = False
+        
+        # Initialize proximity matcher for travel time and transit scoring
+        self.proximity_matcher = ProximityMatcher()
         
         # Volunteer types and characteristics
         self.volunteer_personas = {
@@ -228,6 +233,78 @@ class VolunteerMatchingEngine:
         
         return match_scores[:top_k]
     
+    def find_proximity_matches(self, user_preferences: Dict[str, Any], 
+                             user_location: str = None, top_k: int = 5) -> List[Dict[str, Any]]:
+        """
+        Find volunteer matches enhanced with proximity, travel time, and transit scoring
+        
+        Args:
+            user_preferences: User preferences and interests
+            user_location: User's location (address, city, or landmark)
+            top_k: Number of top matches to return
+            
+        Returns:
+            List of enhanced matches with proximity information
+        """
+        # Get base matches using traditional algorithm
+        base_matches = self.find_matches(user_preferences, top_k * 2)  # Get more for reranking
+        
+        if not user_location:
+            # If no location provided, return original matches
+            print("ℹ️ No user location provided, returning traditional matches")
+            return base_matches[:top_k]
+        
+        print(f"🌍 Enhancing matches with proximity and transit scoring for location: {user_location}")
+        
+        # Enhance matches with proximity information
+        enhanced_matches = self.proximity_matcher.enhance_project_matches(
+            base_matches, user_location, user_preferences
+        )
+        
+        return enhanced_matches[:top_k]
+    
+    def get_location_analysis(self, user_location: str, 
+                            user_preferences: Dict[str, Any] = None) -> Dict[str, Any]:
+        """
+        Analyze location accessibility and travel options to all YMCA branches
+        
+        Args:
+            user_location: User's location
+            user_preferences: User preferences for transportation
+            
+        Returns:
+            Comprehensive location analysis with travel information
+        """
+        if not user_preferences:
+            user_preferences = {}
+        
+        print(f"🗺️ Analyzing location accessibility for: {user_location}")
+        
+        branch_analysis = {}
+        
+        for branch_name in self.proximity_matcher.branch_locations.keys():
+            proximity_info = self.proximity_matcher.calculate_proximity_score(
+                user_location, branch_name, user_preferences
+            )
+            branch_analysis[branch_name] = proximity_info
+        
+        # Sort branches by proximity score
+        sorted_branches = sorted(
+            branch_analysis.items(), 
+            key=lambda x: x[1]['score'], 
+            reverse=True
+        )
+        
+        # Get branch accessibility report
+        accessibility_report = self.proximity_matcher.get_branch_accessibility_report()
+        
+        return {
+            "user_location": user_location,
+            "branch_analysis": dict(sorted_branches),
+            "accessibility_report": accessibility_report,
+            "recommendations": self._generate_location_recommendations(sorted_branches, user_preferences)
+        }
+    
     def _create_user_vector(self, preferences: Dict[str, Any]) -> Dict[str, float]:
         """Create numerical vector from user preferences"""
         vector = {
@@ -303,6 +380,199 @@ class VolunteerMatchingEngine:
         score += min(age_score, 1) * 0.05
         
         return min(score, 1.0)  # Cap at 1.0
+    
+    def find_enhanced_matches_with_training(self, user_preferences: Dict[str, Any], top_k: int = 5) -> Dict[str, Any]:
+        """Find matches enhanced with skill gap analysis and training recommendations"""
+        
+        # Get standard matches
+        standard_matches = self.find_matches(user_preferences, top_k)
+        
+        # Try to enhance with skill gap analysis if we have a contact_id
+        enhanced_matches = []
+        training_suggestions = []
+        
+        try:
+            from skill_gap_analyzer import SkillGapAnalyzer
+            analyzer = SkillGapAnalyzer(self.volunteer_data)
+            
+            # If we can identify the user (by email or other means), analyze their skills
+            contact_id = self._identify_user_contact_id(user_preferences)
+            
+            if contact_id:
+                # Get skill gaps for better matching
+                skill_gaps = analyzer.identify_skill_gaps(contact_id)
+                
+                # Get training recommendations
+                training_plan = analyzer.generate_training_plan(contact_id)
+                training_suggestions = training_plan.get('training_recommendations', [])
+                
+                # Enhance matches with skill gap insights
+                for match in standard_matches:
+                    enhanced_match = match.copy()
+                    
+                    # Add skill-based insights
+                    required_skills = self._get_project_required_skills(match['project_name'])
+                    volunteer_skills = analyzer.analyze_volunteer_skills(contact_id)
+                    
+                    if volunteer_skills and 'skill_proficiencies' in volunteer_skills:
+                        skill_match_score = self._calculate_skill_match_score(
+                            volunteer_skills['skill_proficiencies'], 
+                            required_skills
+                        )
+                        
+                        # Adjust match score based on skill alignment
+                        enhanced_match['skill_match_score'] = skill_match_score
+                        enhanced_match['adjusted_score'] = (match['score'] * 0.7 + skill_match_score * 0.3)
+                        
+                        # Add skill gap insights
+                        relevant_gaps = [
+                            gap for gap in skill_gaps 
+                            if any(skill in required_skills for skill in [gap.skill_name])
+                        ]
+                        
+                        if relevant_gaps:
+                            enhanced_match['skill_gaps'] = [
+                                {
+                                    'skill': gap.skill_name,
+                                    'gap_score': gap.gap_score,
+                                    'importance': gap.importance
+                                }
+                                for gap in relevant_gaps[:2]
+                            ]
+                            
+                            enhanced_match['readiness_level'] = self._calculate_readiness_level(relevant_gaps)
+                        else:
+                            enhanced_match['readiness_level'] = 'Ready'
+                    
+                    enhanced_matches.append(enhanced_match)
+                
+                # Re-sort by adjusted score
+                enhanced_matches.sort(key=lambda x: x.get('adjusted_score', x['score']), reverse=True)
+            else:
+                enhanced_matches = standard_matches
+                
+        except Exception as e:
+            print(f"⚠️ Could not enhance matches with skill analysis: {e}")
+            enhanced_matches = standard_matches
+        
+        return {
+            'matches': enhanced_matches[:top_k],
+            'training_suggestions': training_suggestions[:3],
+            'enhancement_applied': len(enhanced_matches) > 0 and 'skill_match_score' in enhanced_matches[0],
+            'total_analyzed': len(enhanced_matches)
+        }
+    
+    def _identify_user_contact_id(self, preferences: Dict[str, Any]) -> Optional[str]:
+        """Try to identify user's contact_id from preferences or volunteer data"""
+        
+        # Look for email match
+        email = preferences.get('email')
+        if email and self.volunteers_df is not None:
+            email_match = self.volunteers_df[
+                self.volunteers_df['email'].str.lower() == email.lower()
+            ]
+            if not email_match.empty:
+                return email_match.iloc[0]['contact_id']
+        
+        # Look for name match
+        first_name = preferences.get('first_name')
+        last_name = preferences.get('last_name')
+        if first_name and last_name and self.volunteers_df is not None:
+            name_match = self.volunteers_df[
+                (self.volunteers_df['first_name'].str.lower() == first_name.lower()) &
+                (self.volunteers_df['last_name'].str.lower() == last_name.lower())
+            ]
+            if not name_match.empty:
+                return name_match.iloc[0]['contact_id']
+        
+        return None
+    
+    def _get_project_required_skills(self, project_name: str) -> Dict[str, float]:
+        """Get required skills for a specific project"""
+        
+        # Simple mapping based on project categories
+        skill_requirements = {
+            'Youth Development': {
+                'mentoring': 0.7,
+                'child_development': 0.6,
+                'communication': 0.8,
+                'behavior_management': 0.5
+            },
+            'Fitness & Wellness': {
+                'exercise_knowledge': 0.7,
+                'safety_protocols': 0.9,
+                'customer_service': 0.6,
+                'basic_first_aid': 0.5
+            },
+            'Special Events': {
+                'event_coordination': 0.8,
+                'customer_service': 0.7,
+                'teamwork': 0.6,
+                'time_management': 0.5
+            },
+            'Administrative': {
+                'basic_computer_skills': 0.7,
+                'data_entry': 0.6,
+                'organization': 0.8,
+                'phone_etiquette': 0.5
+            },
+            'Facility Support': {
+                'maintenance_basics': 0.6,
+                'safety_awareness': 0.8,
+                'tool_usage': 0.5,
+                'customer_service': 0.4
+            }
+        }
+        
+        # Find project category
+        if self.projects_df is not None:
+            project_match = self.projects_df[
+                self.projects_df['project_name'] == project_name
+            ]
+            if not project_match.empty:
+                category = project_match.iloc[0].get('category', 'General')
+                return skill_requirements.get(category, {})
+        
+        return {}
+    
+    def _calculate_skill_match_score(self, volunteer_skills: Dict[str, float], 
+                                   required_skills: Dict[str, float]) -> float:
+        """Calculate how well volunteer skills match project requirements"""
+        
+        if not required_skills:
+            return 1.0  # No specific requirements
+        
+        total_score = 0.0
+        total_weight = 0.0
+        
+        for skill, required_level in required_skills.items():
+            volunteer_level = volunteer_skills.get(skill, 0.0)
+            
+            # Calculate match score for this skill
+            if volunteer_level >= required_level:
+                skill_score = 1.0  # Meets requirement
+            else:
+                skill_score = volunteer_level / required_level  # Partial match
+            
+            total_score += skill_score * required_level
+            total_weight += required_level
+        
+        return total_score / total_weight if total_weight > 0 else 0.0
+    
+    def _calculate_readiness_level(self, skill_gaps: List) -> str:
+        """Calculate volunteer's readiness level for a project"""
+        
+        if not skill_gaps:
+            return 'Ready'
+        
+        avg_gap = sum(gap.gap_score for gap in skill_gaps) / len(skill_gaps)
+        
+        if avg_gap < 0.2:
+            return 'Ready'
+        elif avg_gap < 0.4:
+            return 'Training Recommended'
+        else:
+            return 'Significant Training Needed'
     
     def _explain_match(self, preferences: Dict[str, Any], project: pd.Series) -> List[str]:
         """Generate explanations for why this is a good match"""
@@ -445,6 +715,54 @@ class VolunteerMatchingEngine:
             recommendations.append("Perfect for trying different types of volunteer work")
         elif persona == 'Newcomer':
             recommendations.append("Look for opportunities with strong volunteer support and training")
+        
+        return recommendations[:3]
+    
+    def _generate_location_recommendations(self, sorted_branches: List[Tuple], 
+                                         user_preferences: Dict[str, Any]) -> List[str]:
+        """Generate personalized location and transportation recommendations"""
+        recommendations = []
+        
+        if not sorted_branches:
+            return ["Consider exploring different YMCA branches for volunteering opportunities"]
+        
+        # Best branch recommendation
+        best_branch, best_info = sorted_branches[0]
+        recommendations.append(f"Based on your location, {best_branch} offers the best combination of accessibility and programs")
+        
+        # Travel mode recommendations
+        best_travel = best_info.get('best_option', {})
+        travel_mode = best_travel.get('mode', 'driving')
+        travel_time = best_travel.get('duration_minutes', 0)
+        
+        if travel_time < 15:
+            recommendations.append("Very convenient location with short travel time")
+        elif travel_time < 30:
+            recommendations.append(f"Reasonable {travel_time} minute {travel_mode.replace('_', ' ')} commute")
+        else:
+            recommendations.append(f"Consider the {travel_time} minute travel time when scheduling volunteer activities")
+        
+        # Transit-specific recommendations
+        transport_prefs = user_preferences.get('transportation', {})
+        has_car = transport_prefs.get('has_car', True)
+        
+        if not has_car:
+            # Find best transit-accessible branches
+            transit_branches = [
+                (name, info) for name, info in sorted_branches[:3]
+                if any(opt.get('mode') == 'transit' and opt.get('transit_score', 0) > 0.5 
+                      for opt in info.get('travel_options', []))
+            ]
+            
+            if transit_branches:
+                transit_branch = transit_branches[0][0]
+                recommendations.append(f"For public transit users, {transit_branch} has the best accessibility")
+            else:
+                recommendations.append("Consider carpooling or rideshare options for better access to volunteer opportunities")
+        
+        # Multiple good options
+        if len([b for b in sorted_branches[:3] if b[1]['score'] > 0.7]) > 1:
+            recommendations.append("You have multiple convenient YMCA locations to choose from")
         
         return recommendations[:3]
     
