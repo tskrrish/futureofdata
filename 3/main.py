@@ -20,6 +20,7 @@ from ai_assistant import VolunteerAIAssistant
 from matching_engine import VolunteerMatchingEngine
 from data_processor import VolunteerDataProcessor
 from database import VolunteerDatabase
+from task_manager import TaskManager, TaskScheduler
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -43,6 +44,8 @@ ai_assistant = VolunteerAIAssistant()
 database = VolunteerDatabase()
 volunteer_data = None
 matching_engine = None
+task_manager = None
+task_scheduler = None
 
 # Pydantic models
 class UserProfile(BaseModel):
@@ -78,11 +81,38 @@ class FeedbackData(BaseModel):
     feedback_text: str = ""
     feedback_type: str = "general"
 
+# Task Management Pydantic Models
+class TaskCreate(BaseModel):
+    title: str
+    description: str = ""
+    priority: int = 2  # 1=low, 2=medium, 3=high, 4=urgent
+    category: str = ""
+    project_id: Optional[int] = None
+    estimated_hours: Optional[float] = None
+    assigned_to: Optional[str] = None
+    deadline_type: str = "fixed"  # 'fixed', 'event_based', 'flexible'
+    fixed_deadline: Optional[datetime] = None
+    event_trigger: Optional[str] = None
+    deadline_offset_days: int = 0
+    dependencies: List[str] = []
+    tags: List[str] = []
+
+class TaskUpdate(BaseModel):
+    status: Optional[str] = None
+    progress: Optional[int] = None
+    notes: Optional[str] = ""
+    time_logged: Optional[float] = 0.0
+
+class DeadlineEvent(BaseModel):
+    event_name: str
+    event_date: datetime
+    event_data: Dict[str, Any] = {}
+
 # Initialize data on startup
 @app.on_event("startup")
 async def startup_event():
     """Initialize application data and models"""
-    global volunteer_data, matching_engine
+    global volunteer_data, matching_engine, task_manager, task_scheduler
     
     print("🚀 Starting Volunteer PathFinder AI Assistant...")
     
@@ -92,6 +122,19 @@ async def startup_event():
         print("✅ Database initialized")
     except Exception as e:
         print(f"⚠️  Database initialization note: {e}")
+    
+    # Initialize task manager
+    try:
+        task_manager = TaskManager(database)
+        print("✅ Task manager initialized")
+        
+        # Start task scheduler for deadline monitoring
+        task_scheduler = TaskScheduler(task_manager)
+        # Note: In production, run this in a separate process
+        # asyncio.create_task(task_scheduler.start())
+        print("✅ Task scheduler initialized")
+    except Exception as e:
+        print(f"❌ Error initializing task manager: {e}")
     
     # Load and process volunteer data
     try:
@@ -677,6 +720,255 @@ async def get_resources() -> JSONResponse:
     }
     
     return JSONResponse(content=resources)
+
+# Task Management API Endpoints
+@app.post("/api/tasks")
+async def create_task(
+    task_data: TaskCreate,
+    created_by: Optional[str] = None
+) -> JSONResponse:
+    """Create a new task with optional event-driven deadlines"""
+    
+    if not task_manager:
+        raise HTTPException(status_code=503, detail="Task management service not available")
+    
+    try:
+        task = await task_manager.create_task(
+            title=task_data.title,
+            description=task_data.description,
+            created_by=created_by,
+            assigned_to=task_data.assigned_to,
+            priority=task_data.priority,
+            category=task_data.category,
+            project_id=task_data.project_id,
+            estimated_hours=task_data.estimated_hours,
+            deadline_type=task_data.deadline_type,
+            fixed_deadline=task_data.fixed_deadline,
+            event_trigger=task_data.event_trigger,
+            deadline_offset_days=task_data.deadline_offset_days,
+            dependencies=task_data.dependencies,
+            tags=task_data.tags
+        )
+        
+        if task:
+            return JSONResponse(content={"task": task, "success": True})
+        else:
+            raise HTTPException(status_code=400, detail="Failed to create task")
+            
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        print(f"❌ Task creation error: {e}")
+        raise HTTPException(status_code=500, detail="Task creation failed")
+
+@app.get("/api/tasks/{task_id}")
+async def get_task(task_id: str) -> JSONResponse:
+    """Get detailed task information"""
+    
+    if not task_manager:
+        raise HTTPException(status_code=503, detail="Task management service not available")
+    
+    try:
+        task = await database.get_task_details(task_id)
+        
+        if task:
+            return JSONResponse(content={"task": task, "success": True})
+        else:
+            raise HTTPException(status_code=404, detail="Task not found")
+            
+    except Exception as e:
+        print(f"❌ Get task error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get task")
+
+@app.put("/api/tasks/{task_id}")
+async def update_task(
+    task_id: str,
+    task_update: TaskUpdate,
+    user_id: Optional[str] = None
+) -> JSONResponse:
+    """Update task progress and status"""
+    
+    if not task_manager:
+        raise HTTPException(status_code=503, detail="Task management service not available")
+    
+    try:
+        success = await task_manager.update_task_progress(
+            task_id=task_id,
+            user_id=user_id or "system",
+            progress=task_update.progress or 0,
+            status=task_update.status,
+            notes=task_update.notes or "",
+            time_logged=task_update.time_logged or 0.0
+        )
+        
+        if success:
+            return JSONResponse(content={"success": True})
+        else:
+            raise HTTPException(status_code=400, detail="Failed to update task")
+            
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        print(f"❌ Task update error: {e}")
+        raise HTTPException(status_code=500, detail="Task update failed")
+
+@app.post("/api/tasks/{task_id}/assign")
+async def assign_task(
+    task_id: str,
+    user_id: str,
+    assigned_by: Optional[str] = None
+) -> JSONResponse:
+    """Assign a task to a user"""
+    
+    if not task_manager:
+        raise HTTPException(status_code=503, detail="Task management service not available")
+    
+    try:
+        success = await task_manager.assign_task_to_user(task_id, user_id, assigned_by)
+        
+        if success:
+            return JSONResponse(content={"success": True})
+        else:
+            raise HTTPException(status_code=400, detail="Failed to assign task")
+            
+    except Exception as e:
+        print(f"❌ Task assignment error: {e}")
+        raise HTTPException(status_code=500, detail="Task assignment failed")
+
+@app.get("/api/users/{user_id}/tasks")
+async def get_user_tasks(user_id: str) -> JSONResponse:
+    """Get user's task dashboard"""
+    
+    if not task_manager:
+        raise HTTPException(status_code=503, detail="Task management service not available")
+    
+    try:
+        dashboard = await task_manager.get_user_task_dashboard(user_id)
+        
+        return JSONResponse(content=dashboard)
+        
+    except Exception as e:
+        print(f"❌ Get user tasks error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get user tasks")
+
+@app.get("/api/users/{user_id}/notifications")
+async def get_user_notifications(
+    user_id: str,
+    unread_only: bool = False
+) -> JSONResponse:
+    """Get user notifications"""
+    
+    try:
+        notifications = await database.get_user_notifications(user_id, unread_only)
+        
+        return JSONResponse(content={"notifications": notifications, "success": True})
+        
+    except Exception as e:
+        print(f"❌ Get notifications error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get notifications")
+
+@app.put("/api/notifications/{notification_id}/read")
+async def mark_notification_read(notification_id: str) -> JSONResponse:
+    """Mark a notification as read"""
+    
+    try:
+        success = await database.mark_notification_read(notification_id)
+        
+        if success:
+            return JSONResponse(content={"success": True})
+        else:
+            raise HTTPException(status_code=400, detail="Failed to mark notification as read")
+            
+    except Exception as e:
+        print(f"❌ Mark notification read error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to mark notification as read")
+
+@app.post("/api/deadline-events")
+async def create_deadline_event(event_data: DeadlineEvent) -> JSONResponse:
+    """Create or update a deadline trigger event"""
+    
+    if not task_manager:
+        raise HTTPException(status_code=503, detail="Task management service not available")
+    
+    try:
+        success = await task_manager.create_deadline_event(
+            event_data.event_name,
+            event_data.event_date,
+            event_data.event_data
+        )
+        
+        if success:
+            return JSONResponse(content={"success": True})
+        else:
+            raise HTTPException(status_code=400, detail="Failed to create deadline event")
+            
+    except Exception as e:
+        print(f"❌ Create deadline event error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create deadline event")
+
+@app.get("/api/deadlines/upcoming")
+async def get_upcoming_deadlines(days_ahead: int = 7) -> JSONResponse:
+    """Get tasks with upcoming deadlines"""
+    
+    if not task_manager:
+        raise HTTPException(status_code=503, detail="Task management service not available")
+    
+    try:
+        upcoming_tasks = await task_manager.get_upcoming_deadlines(days_ahead)
+        
+        return JSONResponse(content={"upcoming_tasks": upcoming_tasks, "success": True})
+        
+    except Exception as e:
+        print(f"❌ Get upcoming deadlines error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get upcoming deadlines")
+
+@app.get("/api/deadlines/overdue")
+async def get_overdue_tasks() -> JSONResponse:
+    """Get overdue tasks"""
+    
+    try:
+        overdue_tasks = await database.get_overdue_tasks()
+        
+        return JSONResponse(content={"overdue_tasks": overdue_tasks, "success": True})
+        
+    except Exception as e:
+        print(f"❌ Get overdue tasks error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get overdue tasks")
+
+@app.get("/api/tasks/analytics")
+async def get_task_analytics(
+    user_id: Optional[str] = None,
+    days: int = 30
+) -> JSONResponse:
+    """Get task analytics"""
+    
+    if not task_manager:
+        raise HTTPException(status_code=503, detail="Task management service not available")
+    
+    try:
+        analytics = await task_manager.get_task_analytics(user_id, days)
+        
+        return JSONResponse(content=analytics)
+        
+    except Exception as e:
+        print(f"❌ Get task analytics error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get task analytics")
+
+@app.post("/api/tasks/check-deadlines")
+async def trigger_deadline_check() -> JSONResponse:
+    """Manually trigger deadline notification check"""
+    
+    if not task_manager:
+        raise HTTPException(status_code=503, detail="Task management service not available")
+    
+    try:
+        await task_manager.check_and_send_deadline_notifications()
+        
+        return JSONResponse(content={"success": True, "message": "Deadline check completed"})
+        
+    except Exception as e:
+        print(f"❌ Deadline check error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to check deadlines")
 
 # Main web interface
 @app.get("/", response_class=HTMLResponse)
