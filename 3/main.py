@@ -20,6 +20,7 @@ from ai_assistant import VolunteerAIAssistant
 from matching_engine import VolunteerMatchingEngine
 from data_processor import VolunteerDataProcessor
 from database import VolunteerDatabase
+from audit_logger import AuditLogger, AuditAction, AuditResource
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -41,6 +42,8 @@ app.add_middleware(
 # Global instances
 ai_assistant = VolunteerAIAssistant()
 database = VolunteerDatabase()
+audit_logger = AuditLogger(database)
+database.set_audit_logger(audit_logger)
 volunteer_data = None
 matching_engine = None
 
@@ -77,6 +80,23 @@ class FeedbackData(BaseModel):
     rating: Optional[int] = None
     feedback_text: str = ""
     feedback_type: str = "general"
+
+class AuditLogFilter(BaseModel):
+    user_id: Optional[str] = None
+    resource: Optional[str] = None
+    resource_id: Optional[str] = None
+    action: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    limit: Optional[int] = 100
+    offset: Optional[int] = 0
+
+class AuditExportRequest(BaseModel):
+    format_type: str = "csv"  # csv, json, excel
+    user_id: Optional[str] = None
+    resource: Optional[str] = None
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
 
 # Initialize data on startup
 @app.on_event("startup")
@@ -677,6 +697,182 @@ async def get_resources() -> JSONResponse:
     }
     
     return JSONResponse(content=resources)
+
+# Audit Log Endpoints
+@app.get("/api/audit/logs")
+async def get_audit_logs(
+    user_id: Optional[str] = None,
+    resource: Optional[str] = None,
+    resource_id: Optional[str] = None,
+    action: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0
+) -> JSONResponse:
+    """Get audit logs with filtering options"""
+    
+    try:
+        # Parse dates
+        start_datetime = None
+        end_datetime = None
+        if start_date:
+            start_datetime = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+        if end_date:
+            end_datetime = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+        
+        # Parse enums
+        resource_enum = None
+        action_enum = None
+        if resource:
+            try:
+                resource_enum = AuditResource(resource.lower())
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"Invalid resource: {resource}")
+        if action:
+            try:
+                action_enum = AuditAction(action.lower())
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"Invalid action: {action}")
+        
+        logs = await audit_logger.get_audit_logs(
+            user_id=user_id,
+            resource=resource_enum,
+            resource_id=resource_id,
+            action=action_enum,
+            start_date=start_datetime,
+            end_date=end_datetime,
+            limit=limit,
+            offset=offset
+        )
+        
+        return JSONResponse(content={
+            "logs": logs,
+            "total_returned": len(logs),
+            "filters": {
+                "user_id": user_id,
+                "resource": resource,
+                "resource_id": resource_id,
+                "action": action,
+                "start_date": start_date,
+                "end_date": end_date,
+                "limit": limit,
+                "offset": offset
+            }
+        })
+        
+    except Exception as e:
+        print(f"❌ Error getting audit logs: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve audit logs")
+
+@app.get("/api/audit/resource/{resource}/{resource_id}")
+async def get_resource_history(resource: str, resource_id: str) -> JSONResponse:
+    """Get complete history of changes for a specific resource"""
+    
+    try:
+        # Parse resource enum
+        try:
+            resource_enum = AuditResource(resource.lower())
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid resource: {resource}")
+        
+        history = await audit_logger.get_resource_history(resource_enum, resource_id)
+        
+        return JSONResponse(content={
+            "resource": resource,
+            "resource_id": resource_id,
+            "history": history,
+            "total_changes": len(history)
+        })
+        
+    except Exception as e:
+        print(f"❌ Error getting resource history: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve resource history")
+
+@app.get("/api/audit/user/{user_id}/activity")
+async def get_user_activity(user_id: str, days: int = 30) -> JSONResponse:
+    """Get all audit activity for a specific user"""
+    
+    try:
+        activity = await audit_logger.get_user_activity(user_id, days)
+        
+        return JSONResponse(content={
+            "user_id": user_id,
+            "period_days": days,
+            "activity": activity,
+            "total_activities": len(activity)
+        })
+        
+    except Exception as e:
+        print(f"❌ Error getting user activity: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve user activity")
+
+@app.get("/api/audit/statistics")
+async def get_audit_statistics(days: int = 30) -> JSONResponse:
+    """Get audit log statistics and insights"""
+    
+    try:
+        stats = await audit_logger.get_audit_statistics(days)
+        return JSONResponse(content=stats)
+        
+    except Exception as e:
+        print(f"❌ Error getting audit statistics: {e}")
+        raise HTTPException(status_code=500, detail="Failed to retrieve audit statistics")
+
+@app.post("/api/audit/export")
+async def export_audit_logs(export_request: AuditExportRequest) -> Any:
+    """Export audit logs to various formats"""
+    
+    try:
+        # Parse dates
+        start_datetime = None
+        end_datetime = None
+        if export_request.start_date:
+            start_datetime = datetime.fromisoformat(export_request.start_date.replace('Z', '+00:00'))
+        if export_request.end_date:
+            end_datetime = datetime.fromisoformat(export_request.end_date.replace('Z', '+00:00'))
+        
+        # Parse resource enum
+        resource_enum = None
+        if export_request.resource:
+            try:
+                resource_enum = AuditResource(export_request.resource.lower())
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"Invalid resource: {export_request.resource}")
+        
+        export_data = await audit_logger.export_audit_logs(
+            format_type=export_request.format_type,
+            user_id=export_request.user_id,
+            resource=resource_enum,
+            start_date=start_datetime,
+            end_date=end_datetime
+        )
+        
+        if export_request.format_type.lower() == "json":
+            return JSONResponse(
+                content={"data": export_data},
+                headers={"Content-Disposition": f"attachment; filename=audit_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"}
+            )
+        elif export_request.format_type.lower() == "csv":
+            from fastapi.responses import Response
+            return Response(
+                content=export_data,
+                media_type="text/csv",
+                headers={"Content-Disposition": f"attachment; filename=audit_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"}
+            )
+        elif export_request.format_type.lower() == "excel":
+            from fastapi.responses import Response
+            return Response(
+                content=export_data,
+                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                headers={"Content-Disposition": f"attachment; filename=audit_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"}
+            )
+        else:
+            raise HTTPException(status_code=400, detail=f"Unsupported export format: {export_request.format_type}")
+        
+    except Exception as e:
+        print(f"❌ Error exporting audit logs: {e}")
+        raise HTTPException(status_code=500, detail="Failed to export audit logs")
 
 # Main web interface
 @app.get("/", response_class=HTMLResponse)
