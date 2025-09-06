@@ -158,8 +158,64 @@ class VolunteerDatabase:
         );
         """
         
+        # Google Calendar Integration tables
+        calendar_auth_sql = """
+        CREATE TABLE IF NOT EXISTS google_calendar_auth (
+            id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+            user_id UUID REFERENCES users(id) ON DELETE CASCADE UNIQUE,
+            google_user_id VARCHAR(100),
+            email VARCHAR(255),
+            access_token TEXT,
+            refresh_token TEXT,
+            token_expires_at TIMESTAMP WITH TIME ZONE,
+            scopes TEXT[],
+            calendar_id VARCHAR(255), -- primary calendar ID
+            sync_enabled BOOLEAN DEFAULT TRUE,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+        """
+        
+        volunteer_shifts_sql = """
+        CREATE TABLE IF NOT EXISTS volunteer_shifts (
+            id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+            user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+            project_id INTEGER,
+            project_name VARCHAR(200),
+            branch VARCHAR(100),
+            shift_title VARCHAR(200),
+            shift_description TEXT,
+            start_time TIMESTAMP WITH TIME ZONE,
+            end_time TIMESTAMP WITH TIME ZONE,
+            location VARCHAR(200),
+            status VARCHAR(20) DEFAULT 'scheduled', -- 'scheduled', 'completed', 'cancelled', 'no_show'
+            google_event_id VARCHAR(255), -- Google Calendar event ID
+            google_calendar_id VARCHAR(255),
+            last_synced_at TIMESTAMP WITH TIME ZONE,
+            sync_status VARCHAR(20) DEFAULT 'pending', -- 'pending', 'synced', 'error', 'manual'
+            sync_error TEXT,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+        """
+        
+        sync_log_sql = """
+        CREATE TABLE IF NOT EXISTS calendar_sync_log (
+            id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+            user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+            sync_type VARCHAR(20), -- 'push_to_google', 'pull_from_google', 'bidirectional'
+            shift_id UUID REFERENCES volunteer_shifts(id) ON DELETE SET NULL,
+            google_event_id VARCHAR(255),
+            operation VARCHAR(20), -- 'create', 'update', 'delete'
+            status VARCHAR(20), -- 'success', 'error', 'conflict'
+            error_message TEXT,
+            sync_details JSONB,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+        """
+        
         # Execute table creation (Note: In production, use proper migrations)
-        tables = [users_sql, preferences_sql, conversations_sql, messages_sql, matches_sql, feedback_sql, analytics_sql]
+        tables = [users_sql, preferences_sql, conversations_sql, messages_sql, matches_sql, feedback_sql, analytics_sql, calendar_auth_sql, volunteer_shifts_sql, sync_log_sql]
         
         print("🗄️  Setting up database tables...")
         for sql in tables:
@@ -497,6 +553,165 @@ class VolunteerDatabase:
             print(f"❌ Error getting popular matches: {e}")
             return []
     
+    # Google Calendar Integration Methods
+    async def save_google_calendar_auth(self, user_id: str, auth_data: Dict[str, Any]) -> bool:
+        """Save Google Calendar authentication data for a user"""
+        try:
+            # Check if auth exists
+            existing = self.supabase.table('google_calendar_auth').eq('user_id', user_id).execute()
+            
+            auth_record = {
+                'user_id': user_id,
+                'google_user_id': auth_data.get('google_user_id'),
+                'email': auth_data.get('email'),
+                'access_token': auth_data.get('access_token'),
+                'refresh_token': auth_data.get('refresh_token'),
+                'token_expires_at': auth_data.get('expires_at'),
+                'scopes': auth_data.get('scopes', []),
+                'calendar_id': auth_data.get('calendar_id'),
+                'sync_enabled': auth_data.get('sync_enabled', True),
+                'updated_at': datetime.now().isoformat()
+            }
+            
+            if existing.data:
+                # Update existing
+                result = self.supabase.table('google_calendar_auth').update(auth_record).eq('user_id', user_id).execute()
+            else:
+                # Create new
+                auth_record['created_at'] = datetime.now().isoformat()
+                result = self.supabase.table('google_calendar_auth').insert(auth_record).execute()
+            
+            return len(result.data) > 0
+        except Exception as e:
+            logger.error(f"Error saving Google Calendar auth: {e}")
+            return False
+    
+    async def get_google_calendar_auth(self, user_id: str) -> Optional[Dict[str, Any]]:
+        """Get Google Calendar authentication data for a user"""
+        try:
+            result = self.supabase.table('google_calendar_auth').eq('user_id', user_id).execute()
+            return result.data[0] if result.data else None
+        except Exception as e:
+            logger.error(f"Error getting Google Calendar auth: {e}")
+            return None
+    
+    async def delete_google_calendar_auth(self, user_id: str) -> bool:
+        """Delete Google Calendar authentication for a user"""
+        try:
+            result = self.supabase.table('google_calendar_auth').delete().eq('user_id', user_id).execute()
+            return True
+        except Exception as e:
+            logger.error(f"Error deleting Google Calendar auth: {e}")
+            return False
+    
+    async def create_volunteer_shift(self, shift_data: Dict[str, Any]) -> Optional[str]:
+        """Create a new volunteer shift"""
+        try:
+            shift_record = {
+                'user_id': shift_data['user_id'],
+                'project_id': shift_data.get('project_id'),
+                'project_name': shift_data.get('project_name', ''),
+                'branch': shift_data.get('branch', ''),
+                'shift_title': shift_data.get('shift_title', ''),
+                'shift_description': shift_data.get('shift_description', ''),
+                'start_time': shift_data['start_time'],
+                'end_time': shift_data['end_time'],
+                'location': shift_data.get('location', ''),
+                'status': shift_data.get('status', 'scheduled'),
+                'google_event_id': shift_data.get('google_event_id'),
+                'google_calendar_id': shift_data.get('google_calendar_id'),
+                'sync_status': shift_data.get('sync_status', 'pending'),
+                'created_at': datetime.now().isoformat(),
+                'updated_at': datetime.now().isoformat()
+            }
+            
+            result = self.supabase.table('volunteer_shifts').insert(shift_record).execute()
+            return result.data[0]['id'] if result.data else None
+        except Exception as e:
+            logger.error(f"Error creating volunteer shift: {e}")
+            return None
+    
+    async def update_volunteer_shift(self, shift_id: str, updates: Dict[str, Any]) -> bool:
+        """Update a volunteer shift"""
+        try:
+            updates['updated_at'] = datetime.now().isoformat()
+            result = self.supabase.table('volunteer_shifts').update(updates).eq('id', shift_id).execute()
+            return len(result.data) > 0
+        except Exception as e:
+            logger.error(f"Error updating volunteer shift: {e}")
+            return False
+    
+    async def get_volunteer_shifts(self, user_id: str, 
+                                  start_date: Optional[datetime] = None,
+                                  end_date: Optional[datetime] = None) -> List[Dict[str, Any]]:
+        """Get volunteer shifts for a user within a date range"""
+        try:
+            query = self.supabase.table('volunteer_shifts').select('*').eq('user_id', user_id)
+            
+            if start_date:
+                query = query.gte('start_time', start_date.isoformat())
+            if end_date:
+                query = query.lte('end_time', end_date.isoformat())
+            
+            result = query.order('start_time').execute()
+            return result.data
+        except Exception as e:
+            logger.error(f"Error getting volunteer shifts: {e}")
+            return []
+    
+    async def get_shifts_needing_sync(self, sync_status: str = 'pending') -> List[Dict[str, Any]]:
+        """Get shifts that need calendar synchronization"""
+        try:
+            result = self.supabase.table('volunteer_shifts')\
+                .select('*, google_calendar_auth!inner(user_id, sync_enabled)')\
+                .eq('sync_status', sync_status)\
+                .eq('google_calendar_auth.sync_enabled', True)\
+                .execute()
+            return result.data
+        except Exception as e:
+            logger.error(f"Error getting shifts needing sync: {e}")
+            return []
+    
+    async def log_calendar_sync(self, log_data: Dict[str, Any]) -> bool:
+        """Log calendar synchronization activity"""
+        try:
+            log_record = {
+                'user_id': log_data['user_id'],
+                'sync_type': log_data['sync_type'],
+                'shift_id': log_data.get('shift_id'),
+                'google_event_id': log_data.get('google_event_id'),
+                'operation': log_data['operation'],
+                'status': log_data['status'],
+                'error_message': log_data.get('error_message'),
+                'sync_details': json.dumps(log_data.get('sync_details', {})),
+                'created_at': datetime.now().isoformat()
+            }
+            
+            result = self.supabase.table('calendar_sync_log').insert(log_record).execute()
+            return len(result.data) > 0
+        except Exception as e:
+            logger.error(f"Error logging calendar sync: {e}")
+            return False
+    
+    async def get_sync_history(self, user_id: str, limit: int = 50) -> List[Dict[str, Any]]:
+        """Get calendar sync history for a user"""
+        try:
+            result = self.supabase.table('calendar_sync_log')\
+                .select('*')\
+                .eq('user_id', user_id)\
+                .order('created_at', desc=True)\
+                .limit(limit)\
+                .execute()
+            
+            for log in result.data:
+                if log.get('sync_details'):
+                    log['sync_details'] = json.loads(log['sync_details'])
+            
+            return result.data
+        except Exception as e:
+            logger.error(f"Error getting sync history: {e}")
+            return []
+
     # Data Export
     async def export_volunteer_data(self) -> Dict[str, pd.DataFrame]:
         """Export all volunteer data for analysis"""
@@ -522,6 +737,20 @@ class VolunteerDatabase:
             # Feedback
             feedback_result = self.supabase.table('volunteer_feedback').select('*').execute()
             tables['feedback'] = pd.DataFrame(feedback_result.data)
+            
+            # Calendar data
+            try:
+                calendar_auth_result = self.supabase.table('google_calendar_auth').select('*').execute()
+                tables['calendar_auth'] = pd.DataFrame(calendar_auth_result.data)
+                
+                shifts_result = self.supabase.table('volunteer_shifts').select('*').execute()
+                tables['volunteer_shifts'] = pd.DataFrame(shifts_result.data)
+                
+                sync_log_result = self.supabase.table('calendar_sync_log').select('*').execute()
+                tables['calendar_sync_log'] = pd.DataFrame(sync_log_result.data)
+            except Exception:
+                # Calendar tables might not exist yet
+                pass
             
             print(f"📊 Exported data: {len(tables)} tables")
             return tables

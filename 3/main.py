@@ -13,6 +13,9 @@ import asyncio
 from datetime import datetime
 import os
 import pandas as pd
+import logging
+
+logger = logging.getLogger(__name__)
 
 # Import our modules
 from config import settings
@@ -20,6 +23,8 @@ from ai_assistant import VolunteerAIAssistant
 from matching_engine import VolunteerMatchingEngine
 from data_processor import VolunteerDataProcessor
 from database import VolunteerDatabase
+from google_calendar_client import GoogleCalendarClient
+from calendar_sync_service import CalendarSyncService
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -43,6 +48,8 @@ ai_assistant = VolunteerAIAssistant()
 database = VolunteerDatabase()
 volunteer_data = None
 matching_engine = None
+calendar_client = GoogleCalendarClient()
+calendar_sync_service = None
 
 # Pydantic models
 class UserProfile(BaseModel):
@@ -78,11 +85,25 @@ class FeedbackData(BaseModel):
     feedback_text: str = ""
     feedback_type: str = "general"
 
+class VolunteerShiftData(BaseModel):
+    project_id: Optional[int] = None
+    project_name: str = ""
+    branch: str = ""
+    shift_title: str
+    shift_description: str = ""
+    start_time: str  # ISO format datetime string
+    end_time: str    # ISO format datetime string
+    location: str = ""
+    status: str = "scheduled"
+
+class CalendarSyncRequest(BaseModel):
+    sync_direction: str = "bidirectional"  # push_to_google, pull_from_google, bidirectional
+
 # Initialize data on startup
 @app.on_event("startup")
 async def startup_event():
     """Initialize application data and models"""
-    global volunteer_data, matching_engine
+    global volunteer_data, matching_engine, calendar_sync_service
     
     print("🚀 Starting Volunteer PathFinder AI Assistant...")
     
@@ -110,6 +131,13 @@ async def startup_event():
             print(f"⚠️  Volunteer data file not found: {settings.VOLUNTEER_DATA_PATH}")
     except Exception as e:
         print(f"❌ Error loading volunteer data: {e}")
+    
+    # Initialize calendar sync service
+    try:
+        calendar_sync_service = CalendarSyncService(database, calendar_client)
+        print("✅ Calendar sync service initialized")
+    except Exception as e:
+        print(f"⚠️  Calendar sync service initialization note: {e}")
     
     print("🎉 Volunteer PathFinder AI Assistant is ready!")
 
@@ -632,6 +660,260 @@ async def get_analytics(days: int = 30) -> JSONResponse:
     except Exception as e:
         print(f"❌ Analytics error: {e}")
         raise HTTPException(status_code=500, detail="Analytics not available")
+
+# Google Calendar Integration Endpoints
+
+@app.get("/api/calendar/auth-url/{user_id}")
+async def get_calendar_auth_url(user_id: str) -> JSONResponse:
+    """Get Google Calendar OAuth authorization URL for a user"""
+    try:
+        redirect_uri = f"{settings.BASE_URL}/api/calendar/callback"
+        auth_url = calendar_client.get_authorization_url(user_id, redirect_uri)
+        
+        return JSONResponse(content={
+            "auth_url": auth_url,
+            "user_id": user_id,
+            "success": True
+        })
+        
+    except Exception as e:
+        logger.error(f"Error generating calendar auth URL: {e}")
+        raise HTTPException(status_code=500, detail="Failed to generate authorization URL")
+
+@app.get("/api/calendar/callback")
+async def calendar_auth_callback(code: str, state: str, error: str = None):
+    """Handle Google Calendar OAuth callback"""
+    if error:
+        return JSONResponse(content={"success": False, "error": error}, status_code=400)
+    
+    try:
+        user_id = state  # state parameter contains user_id
+        redirect_uri = f"{settings.BASE_URL}/api/calendar/callback"
+        
+        # Exchange code for tokens
+        token_data = calendar_client.exchange_code_for_tokens(user_id, code, redirect_uri)
+        
+        # Get user's calendar list to find primary calendar
+        calendars = calendar_client.list_calendars(user_id)
+        primary_calendar = next((cal for cal in calendars if cal.get('primary')), calendars[0] if calendars else None)
+        
+        # Save authentication data to database
+        auth_data = {
+            'user_id': user_id,
+            'access_token': token_data['access_token'],
+            'refresh_token': token_data['refresh_token'],
+            'expires_at': token_data['expires_at'],
+            'scopes': token_data['scopes'],
+            'calendar_id': primary_calendar['id'] if primary_calendar else 'primary',
+            'sync_enabled': True
+        }
+        
+        success = await database.save_google_calendar_auth(user_id, auth_data)
+        
+        if success:
+            # Track calendar connection event
+            await database.track_event(
+                "calendar_connected",
+                {"calendar_id": auth_data['calendar_id']},
+                user_id
+            )
+            
+            return JSONResponse(content={
+                "success": True,
+                "message": "Google Calendar connected successfully",
+                "calendar_id": auth_data['calendar_id']
+            })
+        else:
+            raise HTTPException(status_code=500, detail="Failed to save calendar authentication")
+            
+    except Exception as e:
+        logger.error(f"Error in calendar auth callback: {e}")
+        raise HTTPException(status_code=500, detail="Calendar authentication failed")
+
+@app.get("/api/calendar/status/{user_id}")
+async def get_calendar_status(user_id: str) -> JSONResponse:
+    """Get Google Calendar connection status for a user"""
+    try:
+        auth_data = await database.get_google_calendar_auth(user_id)
+        is_authenticated = calendar_client.is_user_authenticated(user_id)
+        
+        return JSONResponse(content={
+            "connected": auth_data is not None,
+            "authenticated": is_authenticated,
+            "sync_enabled": auth_data.get('sync_enabled', False) if auth_data else False,
+            "calendar_id": auth_data.get('calendar_id') if auth_data else None,
+            "email": auth_data.get('email') if auth_data else None
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting calendar status: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get calendar status")
+
+@app.post("/api/calendar/disconnect/{user_id}")
+async def disconnect_calendar(user_id: str) -> JSONResponse:
+    """Disconnect Google Calendar for a user"""
+    try:
+        # Revoke Google access
+        calendar_client.revoke_user_access(user_id)
+        
+        # Remove from database
+        await database.delete_google_calendar_auth(user_id)
+        
+        # Track disconnection
+        await database.track_event("calendar_disconnected", {}, user_id)
+        
+        return JSONResponse(content={
+            "success": True,
+            "message": "Google Calendar disconnected successfully"
+        })
+        
+    except Exception as e:
+        logger.error(f"Error disconnecting calendar: {e}")
+        raise HTTPException(status_code=500, detail="Failed to disconnect calendar")
+
+@app.post("/api/calendar/sync/{user_id}")
+async def sync_calendar(user_id: str, sync_request: CalendarSyncRequest) -> JSONResponse:
+    """Manually trigger calendar sync for a user"""
+    if not calendar_sync_service:
+        raise HTTPException(status_code=503, detail="Calendar sync service not available")
+    
+    try:
+        result = await calendar_sync_service.sync_volunteer_shifts(user_id, sync_request.sync_direction)
+        
+        # Track sync event
+        await database.track_event(
+            "calendar_sync",
+            {
+                "sync_direction": sync_request.sync_direction,
+                "result": result['summary']
+            },
+            user_id
+        )
+        
+        return JSONResponse(content=result)
+        
+    except Exception as e:
+        logger.error(f"Error syncing calendar: {e}")
+        raise HTTPException(status_code=500, detail="Calendar sync failed")
+
+@app.post("/api/shifts")
+async def create_volunteer_shift(shift_data: VolunteerShiftData, user_id: str) -> JSONResponse:
+    """Create a new volunteer shift"""
+    if not calendar_sync_service:
+        raise HTTPException(status_code=503, detail="Calendar sync service not available")
+    
+    try:
+        shift_dict = shift_data.dict()
+        shift_dict['user_id'] = user_id
+        
+        result = await calendar_sync_service.create_shift_with_calendar(shift_dict)
+        
+        # Track shift creation
+        await database.track_event(
+            "shift_created",
+            {
+                "project_name": shift_data.project_name,
+                "branch": shift_data.branch,
+                "calendar_synced": result.get('calendar_synced', False)
+            },
+            user_id
+        )
+        
+        return JSONResponse(content=result)
+        
+    except Exception as e:
+        logger.error(f"Error creating volunteer shift: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create volunteer shift")
+
+@app.put("/api/shifts/{shift_id}")
+async def update_volunteer_shift(shift_id: str, shift_updates: VolunteerShiftData, user_id: str) -> JSONResponse:
+    """Update a volunteer shift"""
+    if not calendar_sync_service:
+        raise HTTPException(status_code=503, detail="Calendar sync service not available")
+    
+    try:
+        updates = shift_updates.dict(exclude_unset=True)
+        updates['user_id'] = user_id
+        
+        result = await calendar_sync_service.update_shift_with_calendar(shift_id, updates)
+        
+        # Track shift update
+        await database.track_event(
+            "shift_updated",
+            {
+                "shift_id": shift_id,
+                "calendar_synced": result.get('calendar_synced', False)
+            },
+            user_id
+        )
+        
+        return JSONResponse(content=result)
+        
+    except Exception as e:
+        logger.error(f"Error updating volunteer shift: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update volunteer shift")
+
+@app.delete("/api/shifts/{shift_id}")
+async def delete_volunteer_shift(shift_id: str, user_id: str) -> JSONResponse:
+    """Delete a volunteer shift"""
+    if not calendar_sync_service:
+        raise HTTPException(status_code=503, detail="Calendar sync service not available")
+    
+    try:
+        result = await calendar_sync_service.delete_shift_with_calendar(shift_id, user_id)
+        
+        # Track shift deletion
+        await database.track_event(
+            "shift_deleted",
+            {
+                "shift_id": shift_id,
+                "calendar_deleted": result.get('calendar_deleted', False)
+            },
+            user_id
+        )
+        
+        return JSONResponse(content=result)
+        
+    except Exception as e:
+        logger.error(f"Error deleting volunteer shift: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete volunteer shift")
+
+@app.get("/api/shifts/{user_id}")
+async def get_volunteer_shifts(user_id: str, 
+                              start_date: Optional[str] = None,
+                              end_date: Optional[str] = None) -> JSONResponse:
+    """Get volunteer shifts for a user"""
+    try:
+        start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00')) if start_date else None
+        end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00')) if end_date else None
+        
+        shifts = await database.get_volunteer_shifts(user_id, start_dt, end_dt)
+        
+        return JSONResponse(content={
+            "shifts": shifts,
+            "user_id": user_id,
+            "count": len(shifts)
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting volunteer shifts: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get volunteer shifts")
+
+@app.get("/api/calendar/sync-history/{user_id}")
+async def get_sync_history(user_id: str, limit: int = 50) -> JSONResponse:
+    """Get calendar sync history for a user"""
+    try:
+        history = await database.get_sync_history(user_id, limit)
+        
+        return JSONResponse(content={
+            "sync_history": history,
+            "user_id": user_id,
+            "count": len(history)
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting sync history: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get sync history")
 
 # Resources and information
 @app.get("/api/resources")
