@@ -20,6 +20,7 @@ from ai_assistant import VolunteerAIAssistant
 from matching_engine import VolunteerMatchingEngine
 from data_processor import VolunteerDataProcessor
 from database import VolunteerDatabase
+from churn_risk_model import VolunteerChurnRiskModel
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -43,6 +44,7 @@ ai_assistant = VolunteerAIAssistant()
 database = VolunteerDatabase()
 volunteer_data = None
 matching_engine = None
+churn_model = None
 
 # Pydantic models
 class UserProfile(BaseModel):
@@ -82,7 +84,7 @@ class FeedbackData(BaseModel):
 @app.on_event("startup")
 async def startup_event():
     """Initialize application data and models"""
-    global volunteer_data, matching_engine
+    global volunteer_data, matching_engine, churn_model
     
     print("🚀 Starting Volunteer PathFinder AI Assistant...")
     
@@ -104,8 +106,13 @@ async def startup_event():
             matching_engine = VolunteerMatchingEngine(volunteer_data)
             matching_engine.train_models()
             
+            # Initialize churn risk model
+            churn_model = VolunteerChurnRiskModel(volunteer_data)
+            churn_model.train_model()
+            
             print(f"✅ Loaded {len(volunteer_data['volunteers'])} volunteer profiles")
             print(f"✅ Loaded {len(volunteer_data['projects'])} projects")
+            print("✅ Churn risk model initialized")
         else:
             print(f"⚠️  Volunteer data file not found: {settings.VOLUNTEER_DATA_PATH}")
     except Exception as e:
@@ -130,7 +137,8 @@ async def health_check():
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
         "data_loaded": volunteer_data is not None,
-        "models_ready": matching_engine is not None and matching_engine.models_trained
+        "models_ready": matching_engine is not None and matching_engine.models_trained,
+        "churn_model_ready": churn_model is not None and churn_model.model_trained
     }
 
 # Serve static files (for web interface)
@@ -677,6 +685,188 @@ async def get_resources() -> JSONResponse:
     }
     
     return JSONResponse(content=resources)
+
+# Churn Risk Analysis Endpoints
+@app.get("/api/churn/volunteer/{contact_id}")
+async def get_volunteer_churn_risk(contact_id: int) -> JSONResponse:
+    """Get churn risk analysis for a specific volunteer"""
+    
+    if not churn_model:
+        raise HTTPException(status_code=503, detail="Churn risk model not available")
+    
+    try:
+        risk_analysis = churn_model.predict_churn_risk(contact_id)
+        
+        if 'error' in risk_analysis:
+            raise HTTPException(status_code=404, detail=risk_analysis['error'])
+        
+        # Track analytics
+        await database.track_event(
+            "churn_risk_analysis",
+            {
+                "contact_id": contact_id,
+                "risk_score": risk_analysis['risk_score'],
+                "risk_category": risk_analysis['risk_category']
+            }
+        )
+        
+        return JSONResponse(content=risk_analysis)
+        
+    except Exception as e:
+        print(f"❌ Churn risk analysis error: {e}")
+        raise HTTPException(status_code=500, detail="Churn risk analysis failed")
+
+@app.get("/api/churn/high-risk")
+async def get_high_risk_volunteers(
+    threshold: int = 70,
+    limit: int = 20
+) -> JSONResponse:
+    """Get list of volunteers with high churn risk"""
+    
+    if not churn_model:
+        raise HTTPException(status_code=503, detail="Churn risk model not available")
+    
+    try:
+        high_risk_volunteers = churn_model.get_high_risk_volunteers(threshold, limit)
+        
+        # Track analytics
+        await database.track_event(
+            "high_risk_volunteers_query",
+            {
+                "threshold": threshold,
+                "limit": limit,
+                "high_risk_count": len(high_risk_volunteers)
+            }
+        )
+        
+        return JSONResponse(content={
+            "high_risk_volunteers": high_risk_volunteers,
+            "threshold": threshold,
+            "total_found": len(high_risk_volunteers),
+            "generated_at": datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        print(f"❌ High risk volunteers query error: {e}")
+        raise HTTPException(status_code=500, detail="High risk volunteers query failed")
+
+@app.post("/api/churn/batch")
+async def batch_churn_risk_analysis(
+    contact_ids: Optional[List[int]] = None
+) -> JSONResponse:
+    """Get churn risk analysis for multiple volunteers"""
+    
+    if not churn_model:
+        raise HTTPException(status_code=503, detail="Churn risk model not available")
+    
+    try:
+        # Limit batch size to prevent overload
+        if contact_ids and len(contact_ids) > 100:
+            raise HTTPException(status_code=400, detail="Batch size limited to 100 volunteers")
+        
+        batch_results = churn_model.batch_predict_churn_risk(contact_ids)
+        
+        # Filter out errors
+        successful_results = [result for result in batch_results if 'error' not in result]
+        
+        # Calculate summary statistics
+        if successful_results:
+            risk_scores = [result['risk_score'] for result in successful_results]
+            summary_stats = {
+                "total_analyzed": len(successful_results),
+                "avg_risk_score": sum(risk_scores) / len(risk_scores),
+                "high_risk_count": len([score for score in risk_scores if score >= 70]),
+                "medium_risk_count": len([score for score in risk_scores if 30 <= score < 70]),
+                "low_risk_count": len([score for score in risk_scores if score < 30])
+            }
+        else:
+            summary_stats = {"total_analyzed": 0}
+        
+        # Track analytics
+        await database.track_event(
+            "batch_churn_risk_analysis",
+            {
+                "requested_count": len(contact_ids) if contact_ids else 0,
+                "successful_count": len(successful_results),
+                "avg_risk_score": summary_stats.get("avg_risk_score", 0)
+            }
+        )
+        
+        return JSONResponse(content={
+            "results": successful_results,
+            "summary": summary_stats,
+            "generated_at": datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        print(f"❌ Batch churn risk analysis error: {e}")
+        raise HTTPException(status_code=500, detail="Batch churn risk analysis failed")
+
+@app.get("/api/churn/insights")
+async def get_churn_model_insights() -> JSONResponse:
+    """Get insights about the churn prediction model"""
+    
+    if not churn_model:
+        raise HTTPException(status_code=503, detail="Churn risk model not available")
+    
+    try:
+        insights = churn_model.get_model_insights()
+        
+        # Track analytics
+        await database.track_event("churn_model_insights_query", {})
+        
+        return JSONResponse(content=insights)
+        
+    except Exception as e:
+        print(f"❌ Churn model insights error: {e}")
+        raise HTTPException(status_code=500, detail="Churn model insights not available")
+
+class ChurnInterventionRequest(BaseModel):
+    contact_id: int
+    intervention_taken: str
+    notes: Optional[str] = None
+
+@app.post("/api/churn/intervention")
+async def record_churn_intervention(
+    intervention_data: ChurnInterventionRequest,
+    user_id: Optional[str] = None
+) -> JSONResponse:
+    """Record that an intervention has been taken for a volunteer at churn risk"""
+    
+    try:
+        # Get current risk analysis
+        if churn_model:
+            risk_analysis = churn_model.predict_churn_risk(intervention_data.contact_id)
+        else:
+            risk_analysis = {"risk_score": 0, "risk_category": "unknown"}
+        
+        # Save intervention to database
+        intervention_record = {
+            "contact_id": intervention_data.contact_id,
+            "intervention_taken": intervention_data.intervention_taken,
+            "notes": intervention_data.notes,
+            "risk_score_at_intervention": risk_analysis.get('risk_score', 0),
+            "risk_category_at_intervention": risk_analysis.get('risk_category', 'unknown'),
+            "performed_by": user_id,
+            "performed_at": datetime.now().isoformat()
+        }
+        
+        # Track intervention in analytics
+        await database.track_event(
+            "churn_intervention_recorded",
+            intervention_record,
+            user_id
+        )
+        
+        return JSONResponse(content={
+            "success": True,
+            "intervention_recorded": intervention_record,
+            "current_risk_analysis": risk_analysis
+        })
+        
+    except Exception as e:
+        print(f"❌ Churn intervention recording error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to record intervention")
 
 # Main web interface
 @app.get("/", response_class=HTMLResponse)
