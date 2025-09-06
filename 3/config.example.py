@@ -32,4 +32,16 @@ class Settings:
     BASE_URL: str = os.getenv('BASE_URL', 'http://localhost:8000')
     GOOGLE_CREDENTIALS_PATH: str = 'google_credentials.json'
 
+    # QuickBooks Integration
+    QUICKBOOKS_CLIENT_ID: str = os.getenv('QUICKBOOKS_CLIENT_ID', '')
+    QUICKBOOKS_CLIENT_SECRET: str = os.getenv('QUICKBOOKS_CLIENT_SECRET', '')
+    QUICKBOOKS_REDIRECT_URI: str = os.getenv('QUICKBOOKS_REDIRECT_URI', 'http://localhost:8000/api/integration/quickbooks/callback')
+    QUICKBOOKS_DEFAULT_EXPENSE_ACCOUNT: str = os.getenv('QUICKBOOKS_DEFAULT_EXPENSE_ACCOUNT', '1')
+
+    # Xero Integration
+    XERO_CLIENT_ID: str = os.getenv('XERO_CLIENT_ID', '')
+    XERO_CLIENT_SECRET: str = os.getenv('XERO_CLIENT_SECRET', '')
+    XERO_REDIRECT_URI: str = os.getenv('XERO_REDIRECT_URI', 'http://localhost:8000/api/integration/xero/callback')
+    XERO_DEFAULT_EXPENSE_ACCOUNT: str = os.getenv('XERO_DEFAULT_EXPENSE_ACCOUNT', '400')
+
 settings = Settings()

@@ -2,7 +2,7 @@
 Main FastAPI application for Volunteer PathFinder AI Assistant
 Brings together AI, matching engine, and database
 """
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
@@ -17,6 +17,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
 # Import our modules
 from config import settings
 from ai_assistant import VolunteerAIAssistant
@@ -25,6 +26,7 @@ from data_processor import VolunteerDataProcessor
 from database import VolunteerDatabase
 from google_calendar_client import GoogleCalendarClient
 from calendar_sync_service import CalendarSyncService
+
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -46,10 +48,12 @@ app.add_middleware(
 # Global instances
 ai_assistant = VolunteerAIAssistant()
 database = VolunteerDatabase()
+
 volunteer_data = None
 matching_engine = None
 calendar_client = GoogleCalendarClient()
 calendar_sync_service = None
+
 
 # Pydantic models
 class UserProfile(BaseModel):
@@ -85,25 +89,13 @@ class FeedbackData(BaseModel):
     feedback_text: str = ""
     feedback_type: str = "general"
 
-class VolunteerShiftData(BaseModel):
-    project_id: Optional[int] = None
-    project_name: str = ""
-    branch: str = ""
-    shift_title: str
-    shift_description: str = ""
-    start_time: str  # ISO format datetime string
-    end_time: str    # ISO format datetime string
-    location: str = ""
-    status: str = "scheduled"
 
-class CalendarSyncRequest(BaseModel):
-    sync_direction: str = "bidirectional"  # push_to_google, pull_from_google, bidirectional
 
 # Initialize data on startup
 @app.on_event("startup")
 async def startup_event():
     """Initialize application data and models"""
-    global volunteer_data, matching_engine, calendar_sync_service
+
     
     print("🚀 Starting Volunteer PathFinder AI Assistant...")
     
@@ -114,6 +106,7 @@ async def startup_event():
     except Exception as e:
         print(f"⚠️  Database initialization note: {e}")
     
+
     # Load and process volunteer data
     try:
         if os.path.exists(settings.VOLUNTEER_DATA_PATH):
@@ -140,6 +133,14 @@ async def startup_event():
         print(f"⚠️  Calendar sync service initialization note: {e}")
     
     print("🎉 Volunteer PathFinder AI Assistant is ready!")
+    
+    # Include RBAC router
+    try:
+        rbac_router = create_rbac_router(database)
+        app.include_router(rbac_router)
+        print("✅ RBAC API endpoints registered")
+    except Exception as e:
+        print(f"⚠️  RBAC router error: {e}")
 
 @app.post("/api/reset")
 async def reset_context() -> JSONResponse:
@@ -161,9 +162,110 @@ async def health_check():
         "models_ready": matching_engine is not None and matching_engine.models_trained
     }
 
+# SSO Authentication Routes
+@app.get("/auth/google")
+async def google_login():
+    """Initiate Google OAuth login"""
+    auth_url = sso_auth.get_google_auth_url()
+    return {"auth_url": auth_url}
+
+@app.get("/auth/microsoft")
+async def microsoft_login():
+    """Initiate Microsoft OAuth login"""
+    auth_url = sso_auth.get_microsoft_auth_url()
+    return {"auth_url": auth_url}
+
+@app.get("/auth/callback/google")
+async def google_callback(request: Request):
+    """Handle Google OAuth callback"""
+    try:
+        result = await sso_auth.handle_google_callback(request)
+        # Return HTML page that handles the token storage and redirect
+        return HTMLResponse(f"""
+        <!doctype html>
+        <html>
+        <head><title>Authentication Complete</title></head>
+        <body>
+          <script>
+            localStorage.setItem('auth_token', '{result["access_token"]}');
+            localStorage.setItem('user', '{json.dumps(result["user"])}');
+            localStorage.setItem('auth_provider', '{result["provider"]}');
+            window.location.href = '/chat';
+          </script>
+        </body>
+        </html>
+        """)
+    except HTTPException as e:
+        return HTMLResponse(f"""
+        <!doctype html>
+        <html>
+        <head><title>Authentication Error</title></head>
+        <body>
+          <script>
+            alert('Authentication failed: {e.detail}');
+            window.location.href = '/login';
+          </script>
+        </body>
+        </html>
+        """, status_code=e.status_code)
+
+@app.get("/auth/callback/microsoft")
+async def microsoft_callback(request: Request):
+    """Handle Microsoft OAuth callback"""
+    try:
+        result = await sso_auth.handle_microsoft_callback(request)
+        # Return HTML page that handles the token storage and redirect
+        return HTMLResponse(f"""
+        <!doctype html>
+        <html>
+        <head><title>Authentication Complete</title></head>
+        <body>
+          <script>
+            localStorage.setItem('auth_token', '{result["access_token"]}');
+            localStorage.setItem('user', '{json.dumps(result["user"])}');
+            localStorage.setItem('auth_provider', '{result["provider"]}');
+            window.location.href = '/chat';
+          </script>
+        </body>
+        </html>
+        """)
+    except HTTPException as e:
+        return HTMLResponse(f"""
+        <!doctype html>
+        <html>
+        <head><title>Authentication Error</title></head>
+        <body>
+          <script>
+            alert('Authentication failed: {e.detail}');
+            window.location.href = '/login';
+          </script>
+        </body>
+        </html>
+        """, status_code=e.status_code)
+
+@app.get("/auth/me")
+async def get_current_user_info(user = Depends(lambda: get_current_user_optional(database))):
+    """Get current user information"""
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return {"user": user}
+
+@app.post("/auth/logout")
+async def logout():
+    """Logout endpoint (client-side token removal)"""
+    return {"message": "Logged out successfully", "note": "Remove token from client storage"}
+
 # Serve static files (for web interface)
 if os.path.exists("static"):
     app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# Serve login page
+@app.get("/login", response_class=HTMLResponse)
+async def login_page():
+    file_path = os.path.join(os.path.dirname(__file__), "static", "login.html")
+    if os.path.exists(file_path):
+        return FileResponse(file_path)
+    return HTMLResponse("<h3>Login page not found</h3>", status_code=404)
 
 # Serve chat UI directly
 @app.get("/chat", response_class=HTMLResponse)
@@ -172,6 +274,14 @@ async def chat_page():
     if os.path.exists(file_path):
         return FileResponse(file_path)
     return HTMLResponse("<h3>Chat UI not found. Create static/chat.html</h3>", status_code=404)
+
+# Serve templates UI
+@app.get("/templates", response_class=HTMLResponse)
+async def templates_page():
+    file_path = os.path.join(os.path.dirname(__file__), "static", "templates.html")
+    if os.path.exists(file_path):
+        return FileResponse(file_path)
+    return HTMLResponse("<h3>Templates UI not found.</h3>", status_code=404)
 
 class ProfileRequest(BaseModel):
     name: str
@@ -220,7 +330,7 @@ def _derive_preferences_from_history(history_df: pd.DataFrame) -> dict:
     return preferences
 
 @app.post("/api/profile")
-async def get_profile_analysis(req: ProfileRequest) -> JSONResponse:
+async def get_profile_analysis(req: ProfileRequest, request: Request) -> JSONResponse:
     """Analyze a volunteer's profile by their name from the Excel dataset and suggest matches."""
     if volunteer_data is None:
         raise HTTPException(status_code=503, detail="Volunteer data not loaded")
@@ -370,18 +480,35 @@ async def get_profile_analysis(req: ProfileRequest) -> JSONResponse:
         "recommendations": recs,
         "summary": "\n".join(summary_lines)
     }
-    # Save context for subsequent AI chats
+    # Apply PII redaction based on user context
+    try:
+        user_context = get_user_context_from_request(request)
+        # Apply PII masking to the profile payload
+        masked_payload = pii_engine.mask_volunteer_profile(
+            profile_payload, 
+            user_context, 
+            target_user_id=str(contact_id)
+        )
+    except Exception as e:
+        print(f"⚠️ PII redaction error: {e}")
+        # Fall back to basic public masking
+        user_context = UserContext(permission_level=ViewPermissionLevel.PUBLIC)
+        masked_payload = pii_engine.mask_data(profile_payload, user_context)
+    
+    # Save context for subsequent AI chats (use original unmasked data)
     try:
         ai_assistant.add_context("profile", profile_payload)
     except Exception:
         pass
-    return JSONResponse(content=profile_payload)
+    
+    return JSONResponse(content=masked_payload)
 
 # Main chat interface
 @app.post("/api/chat")
 async def chat_with_assistant(
     chat_data: ChatMessage,
-    background_tasks: BackgroundTasks
+    background_tasks: BackgroundTasks,
+    current_user = Depends(lambda: get_current_user_optional(database))
 ) -> JSONResponse:
     """Main chat endpoint for the AI assistant"""
     
@@ -392,6 +519,9 @@ async def chat_with_assistant(
             conversation_id=chat_data.conversation_id
         )
         
+        # Use current user ID if available
+        user_id = current_user['id'] if current_user else chat_data.user_id
+        
         # Save to database in background
         if chat_data.conversation_id:
             background_tasks.add_task(
@@ -399,7 +529,7 @@ async def chat_with_assistant(
                 chat_data.conversation_id,
                 chat_data.message,
                 response.get('response', ''),
-                chat_data.user_id
+                user_id
             )
         
         # Track analytics
@@ -410,7 +540,7 @@ async def chat_with_assistant(
                 "message_length": len(chat_data.message),
                 "response_success": response.get('success', False)
             },
-            chat_data.user_id,
+            user_id,
             chat_data.conversation_id
         )
         
@@ -424,8 +554,9 @@ async def chat_with_assistant(
 @app.post("/api/match")
 async def get_volunteer_matches(
     preferences: UserPreferences,
-    user_id: Optional[str] = None,
-    background_tasks: BackgroundTasks = None
+    background_tasks: BackgroundTasks,
+    current_user = Depends(lambda: get_current_user_optional(database)),
+    user_id: Optional[str] = None
 ) -> JSONResponse:
     """Get personalized volunteer recommendations"""
     
@@ -461,18 +592,21 @@ async def get_volunteer_matches(
             "generated_at": datetime.now().isoformat()
         }
         
+        # Use current user ID if available, otherwise fallback to provided user_id
+        effective_user_id = current_user['id'] if current_user else user_id
+        
         # Save matches to database
-        if user_id:
+        if effective_user_id:
             background_tasks.add_task(
                 database.save_volunteer_matches,
-                user_id,
+                effective_user_id,
                 ml_matches
             )
             
             # Save preferences
             background_tasks.add_task(
                 database.save_user_preferences,
-                user_id,
+                effective_user_id,
                 preferences_dict
             )
         
@@ -485,7 +619,7 @@ async def get_volunteer_matches(
                 "matches_count": len(ml_matches),
                 "top_match_score": ml_matches[0]['score'] if ml_matches else 0
             },
-            user_id
+            effective_user_id
         )
         
         return JSONResponse(content=result)
@@ -519,7 +653,7 @@ async def create_user(user_data: UserProfile) -> JSONResponse:
         raise HTTPException(status_code=500, detail="User creation failed")
 
 @app.get("/api/users/{user_id}")
-async def get_user(user_id: str) -> JSONResponse:
+async def get_user(user_id: str, request: Request) -> JSONResponse:
     """Get user profile"""
     
     try:
@@ -532,12 +666,28 @@ async def get_user(user_id: str) -> JSONResponse:
             # Get user matches
             matches = await database.get_user_matches(user_id)
             
-            return JSONResponse(content={
+            response_data = {
                 "user": user,
                 "preferences": preferences,
                 "matches": matches,
                 "success": True
-            })
+            }
+            
+            # Apply PII redaction based on user context
+            try:
+                user_context = get_user_context_from_request(request)
+                masked_response = pii_engine.mask_volunteer_profile(
+                    response_data, 
+                    user_context, 
+                    target_user_id=user_id
+                )
+            except Exception as e:
+                print(f"⚠️ PII redaction error: {e}")
+                # Fall back to basic public masking
+                user_context = UserContext(permission_level=ViewPermissionLevel.PUBLIC)
+                masked_response = pii_engine.mask_data(response_data, user_context)
+            
+            return JSONResponse(content=masked_response)
         else:
             raise HTTPException(status_code=404, detail="User not found")
             
@@ -960,6 +1110,8 @@ async def get_resources() -> JSONResponse:
     
     return JSONResponse(content=resources)
 
+
+
 # Main web interface
 @app.get("/", response_class=HTMLResponse)
 async def main_interface():
@@ -997,7 +1149,7 @@ async def main_interface():
         <section class=\"hero\">
           <h1>YMCA Volunteer PathFinder</h1>
           <p class=\"lead\">An AI assistant that helps you explore, understand, and navigate YMCA volunteer opportunities.</p>
-          <a class=\"cta\" href=\"/chat\">Start Chat</a>
+
         </section>
 
         <section class=\"section\">
@@ -1075,6 +1227,9 @@ async def save_conversation_message(conversation_id: str, user_message: str,
         await database.save_message(conversation_id, 'assistant', ai_response, user_id)
     except Exception as e:
         print(f"❌ Error saving conversation: {e}")
+
+# Set up reimbursement API endpoints
+setup_reimbursement_api(app, database, reimbursement_manager)
 
 # Run the application
 if __name__ == "__main__":

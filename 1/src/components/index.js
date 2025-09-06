@@ -11,3 +11,7 @@ export { OverviewTab } from "./tabs/OverviewTab";
 export { BranchesTab } from "./tabs/BranchesTab";
 export { PeopleTab } from "./tabs/PeopleTab";
 export { PassportTab } from "./tabs/PassportTab";
+export { FeedbackTab } from "./tabs/FeedbackTab";
+
+export { NPSSurveyModal } from "./surveys/NPSSurveyModal";
+export { NPSAnalytics } from "./analytics/NPSAnalytics";
