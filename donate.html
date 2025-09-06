@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Donate - Support Cancer Research - Wood Hudson</title>
+    <meta name="description" content="Support Wood Hudson Cancer Research Laboratory's mission. Your donation funds cutting-edge cancer research, student education, and advances the fight against cancer.">
+    <link rel="stylesheet" href="styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <header class="header">
+        <nav class="nav-container">
+            <div class="nav-brand">
+                <img src="images/wood-hudson-logo.png" alt="Wood Hudson Cancer Research Laboratory" class="logo">
+            </div>
+            <div class="nav-links">
+                <a href="index.html" class="nav-link">Home</a>
+                <a href="about.html" class="nav-link">About Us</a>
+                <a href="research.html" class="nav-link">Research</a>
+                <a href="urep.html" class="nav-link">UREP</a>
+                <a href="news.html" class="nav-link">News</a>
+                <a href="contact.html" class="nav-link">Contact</a>
+                <a href="donate.html" class="donate-btn active">Donate</a>
+            </div>
+            <div class="mobile-menu-toggle">
+                <span></span>
+                <span></span>
+                <span></span>
+            </div>
+        </nav>
+    </header>
+
+    <main>
+        <section class="page-hero">
+            <div class="container">
+                <h1>Support Our Mission</h1>
+                <p class="hero-subtitle">Your donation advances cancer research and education, bringing hope to patients and training the next generation of researchers</p>
+            </div>
+        </section>
+
+        <section class="donate-impact">
+            <div class="container">
+                <h2>Your Impact</h2>
+                <div class="impact-content">
+                    <div class="impact-text">
+                        <p>Every donation to Wood Hudson Cancer Research Laboratory directly supports our commitment to advancing cancer research and education. Your contribution helps us maintain cutting-edge research programs, provide exceptional educational opportunities for students, and make meaningful contributions to the fight against cancer.</p>
+                    </div>
+                    <div class="impact-examples">
+                        <div class="impact-example">
+                            <div class="impact-amount">$50</div>
+                            <div class="impact-description">
+                                <h3>Research Supplies</h3>
+                                <p>Funds laboratory supplies for one week of cancer cell research experiments</p>
+                            </div>
+                        </div>
+                        <div class="impact-example">
+                            <div class="impact-amount">$150</div>
+                            <div class="impact-description">
+                                <h3>Student Training</h3>
+                                <p>Supports one month of UREP program materials and student training resources</p>
+                            </div>
+                        </div>
+                        <div class="impact-example">
+                            <div class="impact-amount">$500</div>
+                            <div class="impact-description">
+                                <h3>Equipment Maintenance</h3>
+                                <p>Maintains critical research equipment for high-quality biospecimen processing</p>
+                            </div>
+                        </div>
+                        <div class="impact-example">
+                            <div class="impact-amount">$1,000</div>
+                            <div class="impact-description">
+                                <h3>Research Innovation</h3>
+                                <p>Funds new research initiatives and innovative approaches to cancer biology</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="donate-form-section">
+            <div class="container">
+                <div class="donate-main">
+                    <div class="donate-form-container">
+                        <h2>Make a Donation</h2>
+                        <form class="donate-form">
+                            <div class="donation-type">
+                                <h3>Donation Type</h3>
+                                <div class="donation-type-options">
+                                    <label class="option-card">
+                                        <input type="radio" name="donation-type" value="general" checked>
+                                        <div class="option-content">
+                                            <h4>General Support</h4>
+                                            <p>Support our overall mission and research programs</p>
+                                        </div>
+                                    </label>
+                                    <label class="option-card">
+                                        <input type="radio" name="donation-type" value="research">
+                                        <div class="option-content">
+                                            <h4>Research Programs</h4>
+                                            <p>Direct funding for cancer research initiatives</p>
+                                        </div>
+                                    </label>
+                                    <label class="option-card">
+                                        <input type="radio" name="donation-type" value="education">
+                                        <div class="option-content">
+                                            <h4>UREP Program</h4>
+                                            <p>Support student education and training programs</p>
+                                        </div>
+                                    </label>
+                                    <label class="option-card">
+                                        <input type="radio" name="donation-type" value="equipment">
+                                        <div class="option-content">
+                                            <h4>Equipment & Infrastructure</h4>
+                                            <p>Fund laboratory equipment and facility improvements</p>
+                                        </div>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div class="donation-amount">
+                                <h3>Donation Amount</h3>
+                                <div class="amount-buttons">
+                                    <button type="button" class="amount-btn" data-amount="25">$25</button>
+                                    <button type="button" class="amount-btn" data-amount="50">$50</button>
+                                    <button type="button" class="amount-btn" data-amount="100">$100</button>
+                                    <button type="button" class="amount-btn" data-amount="250">$250</button>
+                                    <button type="button" class="amount-btn" data-amount="500">$500</button>
+                                    <button type="button" class="amount-btn" data-amount="1000">$1,000</button>
+                                </div>
+                                <div class="custom-amount-group">
+                                    <label for="custom-amount">Other Amount:</label>
+                                    <div class="amount-input-wrapper">
+                                        <span class="currency-symbol">$</span>
+                                        <input type="number" id="custom-amount" class="custom-amount" placeholder="0.00" min="1" step="0.01">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="donation-frequency">
+                                <h3>Frequency</h3>
+                                <div class="frequency-options">
+                                    <label class="frequency-option">
+                                        <input type="radio" name="frequency" value="one-time" checked>
+                                        <span class="option-text">One-time donation</span>
+                                    </label>
+                                    <label class="frequency-option">
+                                        <input type="radio" name="frequency" value="monthly">
+                                        <span class="option-text">Monthly donation</span>
+                                    </label>
+                                    <label class="frequency-option">
+                                        <input type="radio" name="frequency" value="quarterly">
+                                        <span class="option-text">Quarterly donation</span>
+                                    </label>
+                                    <label class="frequency-option">
+                                        <input type="radio" name="frequency" value="annually">
+                                        <span class="option-text">Annual donation</span>
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div class="donor-information">
+                                <h3>Donor Information (Optional)</h3>
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="first-name">First Name</label>
+                                        <input type="text" id="first-name" name="first-name">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="last-name">Last Name</label>
+                                        <input type="text" id="last-name" name="last-name">
+                                    </div>
+                                </div>
+                                <div class="form-group">
+                                    <label for="donor-email">Email Address</label>
+                                    <input type="email" id="donor-email" name="donor-email">
+                                    <small>For donation receipts and updates (optional)</small>
+                                </div>
+                                <div class="form-group checkbox-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" name="newsletter" value="yes">
+                                        <span class="checkmark"></span>
+                                        Subscribe to our newsletter for research updates
+                                    </label>
+                                </div>
+                                <div class="form-group checkbox-group">
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" name="anonymous" value="yes">
+                                        <span class="checkmark"></span>
+                                        Make this an anonymous donation
+                                    </label>
+                                </div>
+                            </div>
+
+                            <div class="dedication-section">
+                                <h3>Dedication (Optional)</h3>
+                                <div class="dedication-options">
+                                    <label class="dedication-option">
+                                        <input type="radio" name="dedication" value="none" checked>
+                                        <span>No dedication</span>
+                                    </label>
+                                    <label class="dedication-option">
+                                        <input type="radio" name="dedication" value="memory">
+                                        <span>In memory of</span>
+                                    </label>
+                                    <label class="dedication-option">
+                                        <input type="radio" name="dedication" value="honor">
+                                        <span>In honor of</span>
+                                    </label>
+                                </div>
+                                <div class="dedication-details" style="display: none;">
+                                    <div class="form-group">
+                                        <label for="dedication-name">Person's Name</label>
+                                        <input type="text" id="dedication-name" name="dedication-name">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="dedication-message">Optional Message</label>
+                                        <textarea id="dedication-message" name="dedication-message" rows="3"></textarea>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="donation-submit">
+                                <button type="submit" class="btn btn-primary btn-large donate-submit">
+                                    <span class="submit-text">Donate Now</span>
+                                    <span class="submit-amount" style="display: none;"></span>
+                                </button>
+                                <div class="security-info">
+                                    <div class="security-icons">
+                                        <span class="security-icon">🔒</span>
+                                        <span class="security-icon">💳</span>
+                                    </div>
+                                    <p>Your donation is secured with industry-standard encryption. We accept all major credit cards and electronic transfers.</p>
+                                </div>
+                            </div>
+                        </form>
+                    </div>
+
+                    <div class="donation-info">
+                        <div class="info-card">
+                            <h3>Tax Deductibility</h3>
+                            <p>Wood Hudson Cancer Research Laboratory is a qualified tax-exempt organization. Your donation may be tax-deductible to the full extent allowed by law. You will receive a donation receipt for tax purposes.</p>
+                        </div>
+                        
+                        <div class="info-card">
+                            <h3>Transparency</h3>
+                            <div class="transparency-badge-small">
+                                <span class="badge-icon">🏆</span>
+                                <div class="badge-text">
+                                    <strong>Candid Silver Medal</strong>
+                                    <p>We maintain the highest standards of transparency and accountability in all our operations.</p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="info-card">
+                            <h3>Use of Funds</h3>
+                            <div class="fund-allocation">
+                                <div class="allocation-item">
+                                    <div class="allocation-bar">
+                                        <div class="allocation-fill" style="width: 75%"></div>
+                                    </div>
+                                    <div class="allocation-text">
+                                        <span class="allocation-label">Research Programs</span>
+                                        <span class="allocation-percent">75%</span>
+                                    </div>
+                                </div>
+                                <div class="allocation-item">
+                                    <div class="allocation-bar">
+                                        <div class="allocation-fill" style="width: 20%"></div>
+                                    </div>
+                                    <div class="allocation-text">
+                                        <span class="allocation-label">Student Education</span>
+                                        <span class="allocation-percent">20%</span>
+                                    </div>
+                                </div>
+                                <div class="allocation-item">
+                                    <div class="allocation-bar">
+                                        <div class="allocation-fill" style="width: 5%"></div>
+                                    </div>
+                                    <div class="allocation-text">
+                                        <span class="allocation-label">Administrative</span>
+                                        <span class="allocation-percent">5%</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="info-card">
+                            <h3>Other Ways to Give</h3>
+                            <ul>
+                                <li><strong>Corporate Partnerships:</strong> Explore sponsorship opportunities</li>
+                                <li><strong>Legacy Giving:</strong> Include us in your estate planning</li>
+                                <li><strong>Matching Gifts:</strong> Check if your employer matches donations</li>
+                                <li><strong>Stock Donations:</strong> Donate appreciated securities</li>
+                            </ul>
+                            <p><a href="contact.html">Contact us</a> to discuss these options.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="donor-recognition">
+            <div class="container">
+                <h2>Donor Recognition</h2>
+                <div class="recognition-content">
+                    <p>We are grateful to all our donors who make our research and education mission possible. Donors may choose to be recognized at various levels or remain anonymous according to their preference.</p>
+                    
+                    <div class="recognition-levels">
+                        <div class="recognition-level">
+                            <h3>Research Champions</h3>
+                            <p class="level-amount">$1,000+ annually</p>
+                            <p>Special recognition in annual reports and newsletters</p>
+                        </div>
+                        <div class="recognition-level">
+                            <h3>Education Supporters</h3>
+                            <p class="level-amount">$500+ annually</p>
+                            <p>Recognition in UREP program materials</p>
+                        </div>
+                        <div class="recognition-level">
+                            <h3>Research Friends</h3>
+                            <p class="level-amount">$100+ annually</p>
+                            <p>Recognition on our website donor list</p>
+                        </div>
+                        <div class="recognition-level">
+                            <h3>All Donors</h3>
+                            <p class="level-amount">Any amount</p>
+                            <p>Heartfelt gratitude and impact updates</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="contact-donate">
+            <div class="container">
+                <div class="contact-content">
+                    <h2>Questions About Donating?</h2>
+                    <p>Our team is here to help you make the most meaningful contribution to cancer research and education.</p>
+                    <div class="contact-options">
+                        <div class="contact-option">
+                            <h3>Email Us</h3>
+                            <p><a href="mailto:dwbyrum@gmail.com">dwbyrum@gmail.com</a></p>
+                        </div>
+                        <div class="contact-option">
+                            <h3>General Inquiries</h3>
+                            <p><a href="contact.html" class="btn btn-outline">Contact Form</a></p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer class="footer">
+        <div class="container">
+            <div class="footer-content">
+                <div class="footer-section">
+                    <img src="images/wood-hudson-logo.png" alt="Wood Hudson Cancer Research Laboratory" class="footer-logo">
+                    <p>Advancing cancer research through innovation and education in Newport, Kentucky.</p>
+                    <div class="transparency-badge">
+                        <p>🏆 Candid Silver Medal of Transparency</p>
+                    </div>
+                </div>
+                <div class="footer-section">
+                    <h4>Quick Links</h4>
+                    <ul>
+                        <li><a href="about.html">About Us</a></li>
+                        <li><a href="research.html">Research</a></li>
+                        <li><a href="urep.html">UREP</a></li>
+                        <li><a href="news.html">News</a></li>
+                        <li><a href="donate.html">Donate</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h4>Programs</h4>
+                    <ul>
+                        <li><a href="research.html">Cancer Research</a></li>
+                        <li><a href="urep.html">UREP Program</a></li>
+                        <li><a href="research.html">Biospecimen Repository</a></li>
+                        <li><a href="publications.html">Publications</a></li>
+                    </ul>
+                </div>
+                <div class="footer-section">
+                    <h4>Connect</h4>
+                    <p><a href="mailto:dwbyrum@gmail.com">dwbyrum@gmail.com</a></p>
+                    <div class="footer-social">
+                        <a href="#" class="social-link">Facebook</a>
+                        <a href="#" class="social-link">Instagram</a>
+                        <a href="#" class="social-link">LinkedIn</a>
+                    </div>
+                    <div class="donate-footer">
+                        <a href="donate.html" class="btn btn-primary">Donate Now</a>
+                    </div>
+                </div>
+            </div>
+            <div class="footer-bottom">
+                <p>&copy; 2024 Wood Hudson Cancer Research Laboratory. All rights reserved.</p>
+                <p>Newport, Kentucky | <a href="mailto:dwbyrum@gmail.com">dwbyrum@gmail.com</a></p>
+            </div>
+        </div>
+    </footer>
+
+    <script src="script.js"></script>
+    <script>
+        // Donation form enhancements
+        document.addEventListener('DOMContentLoaded', function() {
+            const dedicationOptions = document.querySelectorAll('input[name="dedication"]');
+            const dedicationDetails = document.querySelector('.dedication-details');
+            const customAmount = document.querySelector('.custom-amount');
+            const submitAmount = document.querySelector('.submit-amount');
+            const amountButtons = document.querySelectorAll('.amount-btn');
+
+            // Handle dedication options
+            dedicationOptions.forEach(option => {
+                option.addEventListener('change', function() {
+                    if (this.value !== 'none') {
+                        dedicationDetails.style.display = 'block';
+                    } else {
+                        dedicationDetails.style.display = 'none';
+                    }
+                });
+            });
+
+            // Update submit button with amount
+            function updateSubmitButton() {
+                const selectedAmount = document.querySelector('.amount-btn.active');
+                const customValue = customAmount.value;
+                let amount = 0;
+
+                if (selectedAmount) {
+                    amount = selectedAmount.dataset.amount;
+                } else if (customValue && parseFloat(customValue) > 0) {
+                    amount = parseFloat(customValue);
+                }
+
+                if (amount > 0) {
+                    submitAmount.textContent = ` - $${amount}`;
+                    submitAmount.style.display = 'inline';
+                } else {
+                    submitAmount.style.display = 'none';
+                }
+            }
+
+            amountButtons.forEach(button => {
+                button.addEventListener('click', updateSubmitButton);
+            });
+
+            if (customAmount) {
+                customAmount.addEventListener('input', updateSubmitButton);
+            }
+        });
+    </script>
+</body>
+</html>

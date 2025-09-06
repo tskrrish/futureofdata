@@ -1,0 +1,52 @@
+# Admin CLI Configuration for YMCA Volunteer PathFinder
+# This file configures the behavior of the admin CLI tool
+
+# Batch processing settings
+batch_size: 100  # Number of records to process in each batch
+max_concurrent: 10  # Maximum concurrent operations
+
+# Directory settings
+backup_dir: "./backups"  # Default backup directory
+import_dir: "./imports"  # Default import directory  
+scripts_dir: "./scripts"  # Directory for scripted tasks
+temp_dir: "./temp"  # Temporary files directory
+
+# Logging configuration
+log_level: "INFO"  # DEBUG, INFO, WARNING, ERROR
+log_file: "admin_cli.log"  # Log file name
+log_rotation: true  # Enable log rotation
+max_log_size: "10MB"  # Maximum log file size
+
+# Database settings
+connection_timeout: 30  # Database connection timeout in seconds
+query_timeout: 300  # Query timeout in seconds
+retry_attempts: 3  # Number of retry attempts for failed operations
+
+# Backup settings
+backup_retention_days: 30  # Days to keep backup files
+compression_enabled: true  # Enable backup compression
+include_metadata: true  # Include system metadata in backups
+
+# Import settings
+skip_duplicates: true  # Skip duplicate records during import
+validate_data: true  # Validate data before import
+auto_fix_issues: false  # Attempt to automatically fix data issues
+
+# Script execution settings
+script_timeout: 3600  # Script execution timeout in seconds
+allow_dangerous_scripts: false  # Allow scripts that can modify system files
+script_log_output: true  # Log script output
+
+# Safety settings
+require_confirmation: true  # Require confirmation for destructive operations
+dry_run_default: false  # Default to dry-run mode
+max_batch_delete: 1000  # Maximum records to delete in one batch
+
+# Notification settings (optional)
+email_notifications: false  # Send email notifications
+webhook_url: null  # Webhook for notifications
+slack_webhook: null  # Slack webhook URL
+
+# Performance settings
+memory_limit: "1GB"  # Memory limit for operations
+temp_cleanup: true  # Clean up temporary files after operations

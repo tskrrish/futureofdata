@@ -1,0 +1,155 @@
+
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <title>Data Quality Report</title>
+            <style>
+                body { font-family: Arial, sans-serif; margin: 20px; }
+                .header { background: #f0f0f0; padding: 15px; border-radius: 5px; }
+                .summary { margin: 20px 0; }
+                .error { color: #d32f2f; }
+                .warning { color: #f57c00; }
+                .success { color: #388e3c; }
+                table { width: 100%; border-collapse: collapse; margin: 10px 0; }
+                th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+                th { background-color: #f2f2f2; }
+            </style>
+        </head>
+        <body>
+            <div class="header">
+                <h1>Data Quality Validation Report</h1>
+                <p>Generated: 2025-09-06 20:24:43</p>
+                <p>Branch: member_branch</p>
+            </div>
+            
+            <div class="summary">
+                <h2>Summary</h2>
+                <p><span class="success">Passed Records: 4/5</span></p>
+                <p><span class="error">Failed Records: 1/5</span></p>
+                <p>Total Validations: 142</p>
+                <p><span class="error">Errors: 1</span></p>
+                <p><span class="warning">Warnings: 15</span></p>
+            </div>
+        
+            <div>
+                <h2>Errors</h2>
+                <table>
+                    <tr><th>Field</th><th>Rule</th><th>Message</th><th>Value</th></tr>
+            
+                    <tr class="error">
+                        <td>age</td>
+                        <td>age_range</td>
+                        <td>Field 'age' must be within range: minimum 16, maximum 65</td>
+                        <td>15</td>
+                    </tr>
+                </table></div>
+            <div>
+                <h2>Warnings</h2>
+                <table>
+                    <tr><th>Field</th><th>Rule</th><th>Message</th><th>Value</th></tr>
+            
+                    <tr class="warning">
+                        <td>volunteer_type</td>
+                        <td>volunteer_type_reference</td>
+                        <td>Field 'volunteer_type' must be one of the allowed values</td>
+                        <td>Music Programs</td>
+                    </tr>
+                
+                    <tr class="warning">
+                        <td>project_category</td>
+                        <td>project_category_reference</td>
+                        <td>Field 'project_category' must be one of the allowed values</td>
+                        <td>Arts & Crafts</td>
+                    </tr>
+                
+                    <tr class="warning">
+                        <td>volunteer_type</td>
+                        <td>volunteer_type_reference</td>
+                        <td>Field 'volunteer_type' must be one of the allowed values</td>
+                        <td>Music Programs</td>
+                    </tr>
+                
+                    <tr class="warning">
+                        <td>project_category</td>
+                        <td>project_category_reference</td>
+                        <td>Field 'project_category' must be one of the allowed values</td>
+                        <td>Family Programs</td>
+                    </tr>
+                
+                    <tr class="warning">
+                        <td>project_category</td>
+                        <td>project_category_reference</td>
+                        <td>Field 'project_category' must be one of the allowed values</td>
+                        <td>Family Programs</td>
+                    </tr>
+                
+                    <tr class="warning">
+                        <td>phone</td>
+                        <td>phone_phone_format</td>
+                        <td>Field 'phone' must match phone format</td>
+                        <td>513-555-HELP</td>
+                    </tr>
+                
+                    <tr class="warning">
+                        <td>zip_code</td>
+                        <td>zip_code_zip_code_format</td>
+                        <td>Field 'zip_code' must match zip_code format</td>
+                        <td>INVALID</td>
+                    </tr>
+                
+                    <tr class="warning">
+                        <td>volunteer_type</td>
+                        <td>volunteer_type_reference</td>
+                        <td>Field 'volunteer_type' must be one of the allowed values</td>
+                        <td>Unknown Program</td>
+                    </tr>
+                
+                    <tr class="warning">
+                        <td>project_category</td>
+                        <td>project_category_reference</td>
+                        <td>Field 'project_category' must be one of the allowed values</td>
+                        <td>Invalid Category</td>
+                    </tr>
+                
+                    <tr class="warning">
+                        <td>hours_vs_pledged</td>
+                        <td>hours_vs_pledged_custom</td>
+                        <td>Hours worked should not exceed pledged hours by more than 20%</td>
+                        <td>None</td>
+                    </tr>
+                
+                    <tr class="warning">
+                        <td>phone</td>
+                        <td>phone_phone_format</td>
+                        <td>Field 'phone' must match phone format</td>
+                        <td>513-555-HELP</td>
+                    </tr>
+                
+                    <tr class="warning">
+                        <td>zip_code</td>
+                        <td>zip_code_zip_code_format</td>
+                        <td>Field 'zip_code' must match zip_code format</td>
+                        <td>INVALID</td>
+                    </tr>
+                
+                    <tr class="warning">
+                        <td>volunteer_type</td>
+                        <td>volunteer_type_reference</td>
+                        <td>Field 'volunteer_type' must be one of the allowed values</td>
+                        <td>Unknown Program</td>
+                    </tr>
+                
+                    <tr class="warning">
+                        <td>project_category</td>
+                        <td>project_category_reference</td>
+                        <td>Field 'project_category' must be one of the allowed values</td>
+                        <td>Invalid Category</td>
+                    </tr>
+                
+                    <tr class="warning">
+                        <td>hours_pledged_consistency</td>
+                        <td>hours_pledged_consistency_custom</td>
+                        <td>Hours worked should not exceed pledged hours by more than 25%</td>
+                        <td>None</td>
+                    </tr>
+                </table></div></body></html>
