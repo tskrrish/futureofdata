@@ -304,6 +304,199 @@ class VolunteerMatchingEngine:
         
         return min(score, 1.0)  # Cap at 1.0
     
+    def find_enhanced_matches_with_training(self, user_preferences: Dict[str, Any], top_k: int = 5) -> Dict[str, Any]:
+        """Find matches enhanced with skill gap analysis and training recommendations"""
+        
+        # Get standard matches
+        standard_matches = self.find_matches(user_preferences, top_k)
+        
+        # Try to enhance with skill gap analysis if we have a contact_id
+        enhanced_matches = []
+        training_suggestions = []
+        
+        try:
+            from skill_gap_analyzer import SkillGapAnalyzer
+            analyzer = SkillGapAnalyzer(self.volunteer_data)
+            
+            # If we can identify the user (by email or other means), analyze their skills
+            contact_id = self._identify_user_contact_id(user_preferences)
+            
+            if contact_id:
+                # Get skill gaps for better matching
+                skill_gaps = analyzer.identify_skill_gaps(contact_id)
+                
+                # Get training recommendations
+                training_plan = analyzer.generate_training_plan(contact_id)
+                training_suggestions = training_plan.get('training_recommendations', [])
+                
+                # Enhance matches with skill gap insights
+                for match in standard_matches:
+                    enhanced_match = match.copy()
+                    
+                    # Add skill-based insights
+                    required_skills = self._get_project_required_skills(match['project_name'])
+                    volunteer_skills = analyzer.analyze_volunteer_skills(contact_id)
+                    
+                    if volunteer_skills and 'skill_proficiencies' in volunteer_skills:
+                        skill_match_score = self._calculate_skill_match_score(
+                            volunteer_skills['skill_proficiencies'], 
+                            required_skills
+                        )
+                        
+                        # Adjust match score based on skill alignment
+                        enhanced_match['skill_match_score'] = skill_match_score
+                        enhanced_match['adjusted_score'] = (match['score'] * 0.7 + skill_match_score * 0.3)
+                        
+                        # Add skill gap insights
+                        relevant_gaps = [
+                            gap for gap in skill_gaps 
+                            if any(skill in required_skills for skill in [gap.skill_name])
+                        ]
+                        
+                        if relevant_gaps:
+                            enhanced_match['skill_gaps'] = [
+                                {
+                                    'skill': gap.skill_name,
+                                    'gap_score': gap.gap_score,
+                                    'importance': gap.importance
+                                }
+                                for gap in relevant_gaps[:2]
+                            ]
+                            
+                            enhanced_match['readiness_level'] = self._calculate_readiness_level(relevant_gaps)
+                        else:
+                            enhanced_match['readiness_level'] = 'Ready'
+                    
+                    enhanced_matches.append(enhanced_match)
+                
+                # Re-sort by adjusted score
+                enhanced_matches.sort(key=lambda x: x.get('adjusted_score', x['score']), reverse=True)
+            else:
+                enhanced_matches = standard_matches
+                
+        except Exception as e:
+            print(f"⚠️ Could not enhance matches with skill analysis: {e}")
+            enhanced_matches = standard_matches
+        
+        return {
+            'matches': enhanced_matches[:top_k],
+            'training_suggestions': training_suggestions[:3],
+            'enhancement_applied': len(enhanced_matches) > 0 and 'skill_match_score' in enhanced_matches[0],
+            'total_analyzed': len(enhanced_matches)
+        }
+    
+    def _identify_user_contact_id(self, preferences: Dict[str, Any]) -> Optional[str]:
+        """Try to identify user's contact_id from preferences or volunteer data"""
+        
+        # Look for email match
+        email = preferences.get('email')
+        if email and self.volunteers_df is not None:
+            email_match = self.volunteers_df[
+                self.volunteers_df['email'].str.lower() == email.lower()
+            ]
+            if not email_match.empty:
+                return email_match.iloc[0]['contact_id']
+        
+        # Look for name match
+        first_name = preferences.get('first_name')
+        last_name = preferences.get('last_name')
+        if first_name and last_name and self.volunteers_df is not None:
+            name_match = self.volunteers_df[
+                (self.volunteers_df['first_name'].str.lower() == first_name.lower()) &
+                (self.volunteers_df['last_name'].str.lower() == last_name.lower())
+            ]
+            if not name_match.empty:
+                return name_match.iloc[0]['contact_id']
+        
+        return None
+    
+    def _get_project_required_skills(self, project_name: str) -> Dict[str, float]:
+        """Get required skills for a specific project"""
+        
+        # Simple mapping based on project categories
+        skill_requirements = {
+            'Youth Development': {
+                'mentoring': 0.7,
+                'child_development': 0.6,
+                'communication': 0.8,
+                'behavior_management': 0.5
+            },
+            'Fitness & Wellness': {
+                'exercise_knowledge': 0.7,
+                'safety_protocols': 0.9,
+                'customer_service': 0.6,
+                'basic_first_aid': 0.5
+            },
+            'Special Events': {
+                'event_coordination': 0.8,
+                'customer_service': 0.7,
+                'teamwork': 0.6,
+                'time_management': 0.5
+            },
+            'Administrative': {
+                'basic_computer_skills': 0.7,
+                'data_entry': 0.6,
+                'organization': 0.8,
+                'phone_etiquette': 0.5
+            },
+            'Facility Support': {
+                'maintenance_basics': 0.6,
+                'safety_awareness': 0.8,
+                'tool_usage': 0.5,
+                'customer_service': 0.4
+            }
+        }
+        
+        # Find project category
+        if self.projects_df is not None:
+            project_match = self.projects_df[
+                self.projects_df['project_name'] == project_name
+            ]
+            if not project_match.empty:
+                category = project_match.iloc[0].get('category', 'General')
+                return skill_requirements.get(category, {})
+        
+        return {}
+    
+    def _calculate_skill_match_score(self, volunteer_skills: Dict[str, float], 
+                                   required_skills: Dict[str, float]) -> float:
+        """Calculate how well volunteer skills match project requirements"""
+        
+        if not required_skills:
+            return 1.0  # No specific requirements
+        
+        total_score = 0.0
+        total_weight = 0.0
+        
+        for skill, required_level in required_skills.items():
+            volunteer_level = volunteer_skills.get(skill, 0.0)
+            
+            # Calculate match score for this skill
+            if volunteer_level >= required_level:
+                skill_score = 1.0  # Meets requirement
+            else:
+                skill_score = volunteer_level / required_level  # Partial match
+            
+            total_score += skill_score * required_level
+            total_weight += required_level
+        
+        return total_score / total_weight if total_weight > 0 else 0.0
+    
+    def _calculate_readiness_level(self, skill_gaps: List) -> str:
+        """Calculate volunteer's readiness level for a project"""
+        
+        if not skill_gaps:
+            return 'Ready'
+        
+        avg_gap = sum(gap.gap_score for gap in skill_gaps) / len(skill_gaps)
+        
+        if avg_gap < 0.2:
+            return 'Ready'
+        elif avg_gap < 0.4:
+            return 'Training Recommended'
+        else:
+            return 'Significant Training Needed'
+    
     def _explain_match(self, preferences: Dict[str, Any], project: pd.Series) -> List[str]:
         """Generate explanations for why this is a good match"""
         reasons = []

@@ -20,6 +20,7 @@ from ai_assistant import VolunteerAIAssistant
 from matching_engine import VolunteerMatchingEngine
 from data_processor import VolunteerDataProcessor
 from database import VolunteerDatabase
+from skill_gap_analyzer import SkillGapAnalyzer
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -43,6 +44,7 @@ ai_assistant = VolunteerAIAssistant()
 database = VolunteerDatabase()
 volunteer_data = None
 matching_engine = None
+skill_gap_analyzer = None
 
 # Pydantic models
 class UserProfile(BaseModel):
@@ -78,11 +80,20 @@ class FeedbackData(BaseModel):
     feedback_text: str = ""
     feedback_type: str = "general"
 
+class SkillGapRequest(BaseModel):
+    contact_id: str
+    target_projects: Optional[List[str]] = None
+
+class TrainingPlanRequest(BaseModel):
+    contact_id: str
+    target_projects: Optional[List[str]] = None
+    volunteer_preferences: Optional[Dict[str, Any]] = None
+
 # Initialize data on startup
 @app.on_event("startup")
 async def startup_event():
     """Initialize application data and models"""
-    global volunteer_data, matching_engine
+    global volunteer_data, matching_engine, skill_gap_analyzer
     
     print("🚀 Starting Volunteer PathFinder AI Assistant...")
     
@@ -104,8 +115,12 @@ async def startup_event():
             matching_engine = VolunteerMatchingEngine(volunteer_data)
             matching_engine.train_models()
             
+            # Initialize skill gap analyzer
+            skill_gap_analyzer = SkillGapAnalyzer(volunteer_data)
+            
             print(f"✅ Loaded {len(volunteer_data['volunteers'])} volunteer profiles")
             print(f"✅ Loaded {len(volunteer_data['projects'])} projects")
+            print("✅ Skill gap analyzer initialized")
         else:
             print(f"⚠️  Volunteer data file not found: {settings.VOLUNTEER_DATA_PATH}")
     except Exception as e:
@@ -414,8 +429,17 @@ async def get_volunteer_matches(
             volunteer_data
         )
         
-        # Get ML-based matches
-        ml_matches = matching_engine.find_matches(preferences_dict, top_k=5)
+        # Get enhanced ML-based matches with skill gap analysis
+        try:
+            enhanced_results = matching_engine.find_enhanced_matches_with_training(preferences_dict, top_k=5)
+            ml_matches = enhanced_results['matches']
+            skill_training_suggestions = enhanced_results.get('training_suggestions', [])
+            matching_enhanced = enhanced_results.get('enhancement_applied', False)
+        except:
+            # Fallback to standard matching if enhancement fails
+            ml_matches = matching_engine.find_matches(preferences_dict, top_k=5)
+            skill_training_suggestions = []
+            matching_enhanced = False
         
         # Get success prediction
         success_prediction = matching_engine.predict_volunteer_success(preferences_dict)
@@ -427,6 +451,8 @@ async def get_volunteer_matches(
         result = {
             "ai_recommendations": ai_recommendations.get('recommendations', ''),
             "ml_matches": ml_matches,
+            "skill_training_suggestions": skill_training_suggestions,
+            "matching_enhanced": matching_enhanced,
             "success_prediction": success_prediction,
             "branch_recommendations": branch_recommendations,
             "insights": volunteer_data.get('insights', {}),
@@ -602,6 +628,245 @@ async def submit_feedback(
     except Exception as e:
         print(f"❌ Feedback error: {e}")
         raise HTTPException(status_code=500, detail="Failed to submit feedback")
+
+# Skill Gap Analysis and Training Recommendations
+@app.post("/api/skill-gap-analysis")
+async def analyze_skill_gaps(request: SkillGapRequest) -> JSONResponse:
+    """Analyze skill gaps for a volunteer"""
+    
+    if not skill_gap_analyzer:
+        raise HTTPException(status_code=503, detail="Skill gap analysis service not available")
+    
+    try:
+        # Analyze volunteer skills
+        volunteer_skills = skill_gap_analyzer.analyze_volunteer_skills(request.contact_id)
+        
+        if 'error' in volunteer_skills:
+            raise HTTPException(status_code=404, detail=volunteer_skills['error'])
+        
+        # Identify skill gaps
+        skill_gaps = skill_gap_analyzer.identify_skill_gaps(
+            request.contact_id, 
+            request.target_projects
+        )
+        
+        # Convert skill gaps to serializable format
+        skill_gaps_data = [
+            {
+                "skill_name": gap.skill_name,
+                "gap_score": gap.gap_score,
+                "importance": gap.importance,
+                "projects_requiring": gap.projects_requiring,
+                "current_proficiency": gap.current_proficiency,
+                "target_proficiency": gap.target_proficiency,
+                "category": gap.category
+            }
+            for gap in skill_gaps
+        ]
+        
+        return JSONResponse(content={
+            "contact_id": request.contact_id,
+            "volunteer_skills": volunteer_skills,
+            "skill_gaps": skill_gaps_data,
+            "gaps_count": len(skill_gaps),
+            "priority_gaps": [gap["skill_name"] for gap in skill_gaps_data[:3]],
+            "analysis_timestamp": datetime.now().isoformat()
+        })
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Skill gap analysis error: {e}")
+        raise HTTPException(status_code=500, detail="Skill gap analysis failed")
+
+@app.post("/api/training-recommendations")
+async def get_training_recommendations(request: TrainingPlanRequest) -> JSONResponse:
+    """Get training recommendations to address skill gaps"""
+    
+    if not skill_gap_analyzer:
+        raise HTTPException(status_code=503, detail="Training recommendation service not available")
+    
+    try:
+        # Generate comprehensive training plan
+        training_plan = skill_gap_analyzer.generate_training_plan(
+            request.contact_id,
+            request.target_projects,
+            request.volunteer_preferences
+        )
+        
+        return JSONResponse(content=training_plan)
+        
+    except Exception as e:
+        print(f"❌ Training recommendations error: {e}")
+        raise HTTPException(status_code=500, detail="Training recommendations failed")
+
+@app.get("/api/volunteer/{contact_id}/skill-profile")
+async def get_volunteer_skill_profile(contact_id: str) -> JSONResponse:
+    """Get comprehensive skill profile for a volunteer"""
+    
+    if not skill_gap_analyzer:
+        raise HTTPException(status_code=503, detail="Skill analysis service not available")
+    
+    try:
+        # Get current skills analysis
+        volunteer_skills = skill_gap_analyzer.analyze_volunteer_skills(contact_id)
+        
+        if 'error' in volunteer_skills:
+            raise HTTPException(status_code=404, detail=volunteer_skills['error'])
+        
+        # Get skill gaps for improvement opportunities
+        skill_gaps = skill_gap_analyzer.identify_skill_gaps(contact_id)
+        
+        # Get training recommendations
+        training_plan = skill_gap_analyzer.generate_training_plan(contact_id)
+        
+        return JSONResponse(content={
+            "contact_id": contact_id,
+            "skill_profile": volunteer_skills,
+            "improvement_opportunities": len(skill_gaps),
+            "recommended_training": training_plan.get('training_recommendations', []),
+            "next_steps": training_plan.get('next_steps', []),
+            "impact_potential": training_plan.get('impact_metrics', {}),
+            "generated_at": datetime.now().isoformat()
+        })
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Skill profile error: {e}")
+        raise HTTPException(status_code=500, detail="Skill profile analysis failed")
+
+@app.get("/api/training-catalog")
+async def get_training_catalog() -> JSONResponse:
+    """Get available training programs catalog"""
+    
+    if not skill_gap_analyzer:
+        raise HTTPException(status_code=503, detail="Training catalog service not available")
+    
+    try:
+        # Get training catalog from skill gap analyzer
+        catalog = skill_gap_analyzer.training_catalog
+        
+        # Format for API response
+        formatted_catalog = []
+        for training_name, training_info in catalog.items():
+            formatted_catalog.append({
+                "name": training_name,
+                "skills_addressed": training_info['skills'],
+                "duration_hours": training_info['duration'],
+                "format": training_info['format'],
+                "cost": training_info['cost'],
+                "provider": training_info['provider'],
+                "description": training_info['description'],
+                "prerequisites": training_info['prerequisites'],
+                "expected_outcomes": training_info['outcomes']
+            })
+        
+        # Get skill taxonomy for context
+        skill_taxonomy = skill_gap_analyzer.skill_taxonomy
+        
+        return JSONResponse(content={
+            "training_programs": formatted_catalog,
+            "total_programs": len(formatted_catalog),
+            "skill_categories": list(skill_taxonomy.keys()),
+            "skill_taxonomy": skill_taxonomy
+        })
+        
+    except Exception as e:
+        print(f"❌ Training catalog error: {e}")
+        raise HTTPException(status_code=500, detail="Training catalog not available")
+
+@app.post("/api/enhanced-matching")
+async def get_enhanced_matching_with_training(
+    preferences: UserPreferences,
+    user_id: Optional[str] = None,
+    background_tasks: BackgroundTasks = None
+) -> JSONResponse:
+    """Get enhanced volunteer matching with integrated skill gap analysis and training recommendations"""
+    
+    if not matching_engine or not skill_gap_analyzer:
+        raise HTTPException(status_code=503, detail="Enhanced matching service not available")
+    
+    try:
+        preferences_dict = preferences.dict()
+        
+        # Get enhanced matches with skill gap analysis
+        enhanced_results = matching_engine.find_enhanced_matches_with_training(preferences_dict, top_k=5)
+        
+        # Get comprehensive insights
+        result = {
+            "enhanced_matches": enhanced_results['matches'],
+            "training_suggestions": enhanced_results.get('training_suggestions', []),
+            "skill_enhancement_applied": enhanced_results.get('enhancement_applied', False),
+            "analysis_summary": {
+                "total_matches_analyzed": enhanced_results.get('total_analyzed', 0),
+                "skill_gaps_identified": len(enhanced_results.get('training_suggestions', [])) > 0,
+                "improvement_potential": "High" if len(enhanced_results.get('training_suggestions', [])) > 2 else "Moderate" if len(enhanced_results.get('training_suggestions', [])) > 0 else "Low"
+            },
+            "next_steps": _generate_enhanced_next_steps(enhanced_results),
+            "generated_at": datetime.now().isoformat()
+        }
+        
+        # Save enhanced results
+        if user_id:
+            background_tasks.add_task(
+                database.save_volunteer_matches,
+                user_id,
+                enhanced_results['matches']
+            )
+            
+            # Track enhanced matching usage
+            background_tasks.add_task(
+                database.track_event,
+                "enhanced_matching_used",
+                {
+                    "skill_enhancement": enhanced_results.get('enhancement_applied', False),
+                    "training_suggestions_count": len(enhanced_results.get('training_suggestions', [])),
+                    "top_match_readiness": enhanced_results['matches'][0].get('readiness_level', 'Unknown') if enhanced_results['matches'] else None
+                },
+                user_id
+            )
+        
+        return JSONResponse(content=result)
+        
+    except Exception as e:
+        print(f"❌ Enhanced matching error: {e}")
+        raise HTTPException(status_code=500, detail="Enhanced matching service failed")
+
+def _generate_enhanced_next_steps(enhanced_results: Dict[str, Any]) -> List[str]:
+    """Generate next steps based on enhanced matching results"""
+    
+    next_steps = []
+    matches = enhanced_results.get('matches', [])
+    training_suggestions = enhanced_results.get('training_suggestions', [])
+    
+    if matches:
+        top_match = matches[0]
+        readiness = top_match.get('readiness_level', 'Ready')
+        
+        if readiness == 'Ready':
+            next_steps.append(f"✅ You're ready to start with '{top_match['project_name']}' at {top_match['branch']}")
+            next_steps.append("🎯 Apply directly through VolunteerMatters or contact the branch")
+        elif readiness == 'Training Recommended':
+            next_steps.append(f"📚 Consider training to enhance your fit for '{top_match['project_name']}'")
+            if training_suggestions:
+                next_steps.append(f"🎓 Start with: {training_suggestions[0]['name']}")
+        else:  # Significant Training Needed
+            next_steps.append("🚀 Build foundational skills before applying to top matches")
+            if training_suggestions:
+                next_steps.append(f"📖 Begin with: {training_suggestions[0]['name']}")
+    
+    if training_suggestions:
+        total_hours = sum(t.get('duration_hours', 0) for t in training_suggestions)
+        next_steps.append(f"⏱️ Total recommended training: {total_hours} hours")
+    
+    # Add general guidance
+    next_steps.extend([
+        "💬 Discuss your volunteer interests with a branch coordinator",
+        "📞 Contact your preferred YMCA branch to learn more"
+    ])
+    
+    return next_steps[:5]
 
 # Analytics
 @app.get("/api/analytics")
