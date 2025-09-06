@@ -13,12 +13,14 @@ import { OverviewTab } from "./components/tabs/OverviewTab";
 import { BranchesTab } from "./components/tabs/BranchesTab";
 import { PeopleTab } from "./components/tabs/PeopleTab";
 import { PassportTab } from "./components/tabs/PassportTab";
+import VoiceAssistant from "./components/VoiceAssistant";
 
 export default function App() {
   const [raw, setRaw] = useState(SAMPLE_DATA);
   const [branchFilter, setBranchFilter] = useState("All");
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState("overview");
+  const [voiceData, setVoiceData] = useState(null);
 
   const {
     branches,
@@ -41,6 +43,17 @@ export default function App() {
     activesByBranch: () => exportCSV("actives_by_branch.csv", activesByBranch),
     memberShare: () => exportCSV("member_share_by_branch.csv", memberShareByBranch),
     rawCurrentView: () => exportCSV("raw_current_view.csv", filtered),
+  };
+
+  const handleVoiceDataUpdate = (data) => {
+    setVoiceData(data);
+    // Apply voice-initiated filters or searches
+    if (data.filtered) {
+      setRaw(data.filtered);
+    }
+    if (data.filterTerm) {
+      setSearch(data.filterTerm);
+    }
   };
 
   return (
@@ -118,6 +131,12 @@ export default function App() {
       <footer className="max-w-7xl mx-auto px-4 py-10 text-xs text-neutral-500">
         Built for YMCA Cincinnati — Hackathon: Platform for Belonging. Upload VolunteerMatters CSV/JSON above to power the dashboard.
       </footer>
+      
+      {/* Voice Assistant */}
+      <VoiceAssistant 
+        volunteerData={raw}
+        onDataUpdate={handleVoiceDataUpdate}
+      />
     </div>
   );
 }
