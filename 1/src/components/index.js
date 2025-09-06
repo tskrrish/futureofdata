@@ -11,3 +11,7 @@ export { OverviewTab } from "./tabs/OverviewTab";
 export { BranchesTab } from "./tabs/BranchesTab";
 export { PeopleTab } from "./tabs/PeopleTab";
 export { PassportTab } from "./tabs/PassportTab";
+
+export { SaveDashboardView } from "./views/SaveDashboardView";
+export { DashboardViewManager } from "./views/DashboardViewManager";
+export { ShareViewModal } from "./views/ShareViewModal";
