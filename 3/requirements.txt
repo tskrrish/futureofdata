@@ -21,3 +21,6 @@ streamlit==1.28.1
 requests==2.31.0
 websockets==11.0.3
 typing-extensions==4.8.0
+slack-sdk==3.26.2
+slack-bolt==1.18.1
+schedule==1.2.0

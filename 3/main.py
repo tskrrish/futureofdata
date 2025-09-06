@@ -20,6 +20,9 @@ from ai_assistant import VolunteerAIAssistant
 from matching_engine import VolunteerMatchingEngine
 from data_processor import VolunteerDataProcessor
 from database import VolunteerDatabase
+from slack_integration import slack_integration
+from shift_service import shift_service, Shift, ShiftSignup
+import scheduler  # This starts the background scheduler
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -632,6 +635,130 @@ async def get_analytics(days: int = 30) -> JSONResponse:
     except Exception as e:
         print(f"❌ Analytics error: {e}")
         raise HTTPException(status_code=500, detail="Analytics not available")
+
+# Slack Integration Endpoints
+
+@app.post("/api/shifts")
+async def create_shift(shift_data: Shift, background_tasks: BackgroundTasks) -> JSONResponse:
+    """Create a new volunteer shift and announce it on Slack"""
+    
+    try:
+        shift_id = await shift_service.create_shift(shift_data, announce=settings.SLACK_ENABLED)
+        
+        return JSONResponse(content={
+            "shift_id": shift_id,
+            "success": True,
+            "message": "Shift created successfully"
+        })
+        
+    except Exception as e:
+        print(f"❌ Error creating shift: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create shift")
+
+@app.post("/api/shifts/{shift_id}/signup")
+async def signup_for_shift(
+    shift_id: str,
+    volunteer_id: str,
+    volunteer_name: str,
+    volunteer_email: str,
+    background_tasks: BackgroundTasks
+) -> JSONResponse:
+    """Sign up volunteer for a shift"""
+    
+    try:
+        signup_id = await shift_service.signup_for_shift(
+            shift_id, volunteer_id, volunteer_name, volunteer_email
+        )
+        
+        return JSONResponse(content={
+            "signup_id": signup_id,
+            "success": True,
+            "message": "Signup successful"
+        })
+        
+    except Exception as e:
+        print(f"❌ Error signing up for shift: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/api/signups/{signup_id}/approve")
+async def approve_signup(
+    signup_id: str,
+    approver_id: str,
+    notes: Optional[str] = None
+) -> JSONResponse:
+    """Approve a volunteer signup"""
+    
+    try:
+        success = await shift_service.approve_signup(signup_id, approver_id, notes)
+        
+        return JSONResponse(content={
+            "success": success,
+            "message": "Signup approved successfully"
+        })
+        
+    except Exception as e:
+        print(f"❌ Error approving signup: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.post("/api/shifts/{shift_id}/cancel")
+async def cancel_shift(
+    shift_id: str,
+    reason: Optional[str] = ""
+) -> JSONResponse:
+    """Cancel a shift and notify volunteers"""
+    
+    try:
+        success = await shift_service.cancel_shift(shift_id, reason)
+        
+        return JSONResponse(content={
+            "success": success,
+            "message": "Shift cancelled successfully"
+        })
+        
+    except Exception as e:
+        print(f"❌ Error cancelling shift: {e}")
+        raise HTTPException(status_code=500, detail="Failed to cancel shift")
+
+@app.post("/api/shifts/reminders")
+async def send_shift_reminders(hours_before: int = 24) -> JSONResponse:
+    """Send reminders for upcoming shifts"""
+    
+    try:
+        reminders_sent = await shift_service.send_shift_reminders(hours_before)
+        
+        return JSONResponse(content={
+            "reminders_sent": reminders_sent,
+            "success": True,
+            "message": f"Sent {reminders_sent} shift reminders"
+        })
+        
+    except Exception as e:
+        print(f"❌ Error sending reminders: {e}")
+        raise HTTPException(status_code=500, detail="Failed to send reminders")
+
+@app.get("/api/volunteers/{volunteer_id}/shifts")
+async def get_volunteer_shifts(volunteer_id: str) -> JSONResponse:
+    """Get all shifts for a volunteer"""
+    
+    try:
+        shifts = await shift_service.get_volunteer_shifts(volunteer_id)
+        
+        return JSONResponse(content={
+            "shifts": shifts,
+            "success": True
+        })
+        
+    except Exception as e:
+        print(f"❌ Error getting volunteer shifts: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get volunteer shifts")
+
+# Slack Events Handler
+slack_handler = slack_integration.get_request_handler()
+if slack_handler:
+    @app.post("/slack/events")
+    async def handle_slack_events(request):
+        """Handle Slack events and interactive components"""
+        return await slack_handler.handle(request)
 
 # Resources and information
 @app.get("/api/resources")
