@@ -13,6 +13,7 @@ import { OverviewTab } from "./components/tabs/OverviewTab";
 import { BranchesTab } from "./components/tabs/BranchesTab";
 import { PeopleTab } from "./components/tabs/PeopleTab";
 import { PassportTab } from "./components/tabs/PassportTab";
+import { DataStoriesTab } from "./components/tabs/DataStoriesTab";
 
 export default function App() {
   const [raw, setRaw] = useState(SAMPLE_DATA);
@@ -20,6 +21,8 @@ export default function App() {
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState("overview");
 
+  const volunteerData = useVolunteerData(raw, branchFilter, search);
+  
   const {
     branches,
     filtered,
@@ -32,7 +35,7 @@ export default function App() {
     trendByMonth,
     leaderboard,
     badges
-  } = useVolunteerData(raw, branchFilter, search);
+  } = volunteerData;
 
   const handleFile = useFileUpload(setRaw);
 
@@ -80,6 +83,7 @@ export default function App() {
             ["branches", "Branch Breakdown"],
             ["people", "People & Badges"],
             ["passport", "Belonging Passport"],
+            ["stories", "Data Stories"],
           ].map(([id, label]) => (
             <button
               key={id}
@@ -113,6 +117,8 @@ export default function App() {
         )}
 
         {tab === "passport" && <PassportTab />}
+
+        {tab === "stories" && <DataStoriesTab volunteerData={volunteerData} />}
       </div>
 
       <footer className="max-w-7xl mx-auto px-4 py-10 text-xs text-neutral-500">
