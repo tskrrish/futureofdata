@@ -13,6 +13,7 @@ import { OverviewTab } from "./components/tabs/OverviewTab";
 import { BranchesTab } from "./components/tabs/BranchesTab";
 import { PeopleTab } from "./components/tabs/PeopleTab";
 import { PassportTab } from "./components/tabs/PassportTab";
+import { ReportDesigner } from "./components/report-designer/ReportDesigner";
 
 export default function App() {
   const [raw, setRaw] = useState(SAMPLE_DATA);
@@ -42,6 +43,47 @@ export default function App() {
     memberShare: () => exportCSV("member_share_by_branch.csv", memberShareByBranch),
     rawCurrentView: () => exportCSV("raw_current_view.csv", filtered),
   };
+
+  // Special layout for report designer
+  if (tab === "report-designer") {
+    return (
+      <div className="min-h-screen bg-neutral-50">
+        <Header onFileUpload={handleFile} onExportRaw={exportHandlers.rawCurrentView} />
+        <div className="border-b bg-white px-4">
+          <div className="max-w-7xl mx-auto">
+            <div className="inline-flex rounded-2xl border bg-white overflow-hidden text-sm my-4">
+              {[
+                ["overview", "Overview"],
+                ["branches", "Branch Breakdown"],
+                ["people", "People & Badges"],
+                ["passport", "Belonging Passport"],
+                ["report-designer", "Report Designer"],
+              ].map(([id, label]) => (
+                <button
+                  key={id}
+                  className={`px-4 py-2 ${tab === id ? "bg-neutral-100" : "hover:bg-neutral-50"}`}
+                  onClick={() => setTab(id)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+        <ReportDesigner
+          volunteerData={{
+            totalHours,
+            activeVolunteersCount,
+            memberVolunteersCount,
+            hoursByBranch,
+            activesByBranch,
+            memberShareByBranch,
+            trendByMonth
+          }}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-neutral-50">
@@ -80,6 +122,7 @@ export default function App() {
             ["branches", "Branch Breakdown"],
             ["people", "People & Badges"],
             ["passport", "Belonging Passport"],
+            ["report-designer", "Report Designer"],
           ].map(([id, label]) => (
             <button
               key={id}
