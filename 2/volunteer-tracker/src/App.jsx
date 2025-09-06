@@ -3,7 +3,10 @@ import confetti from 'canvas-confetti';
 import { playCheer, playDrumroll, playFanfare, playAmbientTone, playCardFlip, playMagicalSparkle } from './utils/audio.js';
 import Badge from './components/Badge.jsx';
 import CelebrationOverlay from './components/CelebrationOverlay.jsx';
+import QuestsList from './components/QuestsList.jsx';
+import QuestRewards from './components/QuestRewards.jsx';
 import { getTierForHours, MILESTONES } from './constants.js';
+import { useQuests } from './hooks/useQuests.js';
 
 function App() {
   const [searchTerm, setSearchTerm] = useState('');
@@ -12,6 +15,32 @@ function App() {
   const firedRef = useRef(false);
   const [showOverlay, setShowOverlay] = useState(false);
   const [hideSearchBar, setHideSearchBar] = useState(false);
+  const [showQuests, setShowQuests] = useState(false);
+  const [questRewards, setQuestRewards] = useState(null);
+  const [completedQuestTitle, setCompletedQuestTitle] = useState('');
+
+  const { 
+    quests, 
+    startQuest, 
+    completeQuest, 
+    abandonQuest, 
+    getTimeRemainingText, 
+    totalQuestPoints 
+  } = useQuests(volunteerData);
+
+  const handleQuestComplete = (questId) => {
+    const rewards = completeQuest(questId);
+    if (rewards) {
+      const quest = quests.find(q => q.id === questId);
+      setQuestRewards(rewards);
+      setCompletedQuestTitle(quest?.title || 'Unknown Quest');
+    }
+  };
+
+  const handleQuestRewardsClosed = () => {
+    setQuestRewards(null);
+    setCompletedQuestTitle('');
+  };
 
   function runFullScreenConfetti(hours) {
     const duration = Math.min(9000, 4000 + hours * 40);
@@ -162,6 +191,35 @@ function App() {
         show={showOverlay} 
         seed={volunteerData ? `${volunteerData.first_name}${volunteerData.last_name}` : ''} 
         tier={volunteerData ? getTierForHours(Number(volunteerData.hours_total)) : 'basic'} 
+      />
+
+      {/* Quest Toggle Button */}
+      <button 
+        className="quest-toggle-btn"
+        onClick={() => setShowQuests(!showQuests)}
+        title="View Quests & Challenges"
+      >
+        🏅
+      </button>
+
+      {/* Quests Panel */}
+      {showQuests && (
+        <QuestsList
+          quests={quests}
+          onStartQuest={startQuest}
+          onCompleteQuest={handleQuestComplete}
+          onAbandonQuest={abandonQuest}
+          getTimeRemainingText={getTimeRemainingText}
+          totalQuestPoints={totalQuestPoints}
+        />
+      )}
+
+      {/* Quest Rewards Modal */}
+      <QuestRewards
+        rewards={questRewards}
+        questTitle={completedQuestTitle}
+        onClose={handleQuestRewardsClosed}
+        isVisible={!!questRewards}
       />
     </div>
   );
