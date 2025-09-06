@@ -23,6 +23,9 @@ from ai_assistant import VolunteerAIAssistant
 from matching_engine import VolunteerMatchingEngine
 from data_processor import VolunteerDataProcessor
 from database import VolunteerDatabase
+from rbac_api import create_rbac_router
+from rbac_middleware import create_rbac_middleware
+from rbac_models import RBACService
 
 
 # Initialize FastAPI app
@@ -49,6 +52,9 @@ retention_manager = None
 retention_scheduler = None
 volunteer_data = None
 matching_engine = None
+rbac_middleware = None
+rbac_dependency = None
+rbac_service = None
 
 # Pydantic models
 class UserProfile(BaseModel):
@@ -89,7 +95,7 @@ class FeedbackData(BaseModel):
 @app.on_event("startup")
 async def startup_event():
     """Initialize application data and models"""
-    global volunteer_data, matching_engine, retention_manager, retention_scheduler
+
     
     print("🚀 Starting Volunteer PathFinder AI Assistant...")
     
@@ -100,22 +106,7 @@ async def startup_event():
     except Exception as e:
         print(f"⚠️  Database initialization note: {e}")
     
-    # Initialize retention manager and scheduler
-    if database.supabase:
-        try:
-            retention_manager = DataRetentionManager(database.supabase)
-            await retention_manager.initialize_retention_tables()
-            
-            # Set up default retention policies
-            await setup_default_retention_policies(retention_manager)
-            
-            # Initialize and start the retention scheduler
-            retention_scheduler = RetentionScheduler(retention_manager)
-            await retention_scheduler.start()
-            
-            print("✅ Data retention system initialized")
-        except Exception as e:
-            print(f"⚠️  Retention system initialization note: {e}")
+
     
     # Load and process volunteer data
     try:
@@ -136,6 +127,14 @@ async def startup_event():
         print(f"❌ Error loading volunteer data: {e}")
     
     print("🎉 Volunteer PathFinder AI Assistant is ready!")
+    
+    # Include RBAC router
+    try:
+        rbac_router = create_rbac_router(database)
+        app.include_router(rbac_router)
+        print("✅ RBAC API endpoints registered")
+    except Exception as e:
+        print(f"⚠️  RBAC router error: {e}")
 
 @app.post("/api/reset")
 async def reset_context() -> JSONResponse:
