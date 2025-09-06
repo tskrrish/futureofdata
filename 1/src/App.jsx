@@ -13,6 +13,7 @@ import { OverviewTab } from "./components/tabs/OverviewTab";
 import { BranchesTab } from "./components/tabs/BranchesTab";
 import { PeopleTab } from "./components/tabs/PeopleTab";
 import { PassportTab } from "./components/tabs/PassportTab";
+import { RSVPTab } from "./components/tabs/RSVPTab";
 
 export default function App() {
   const [raw, setRaw] = useState(SAMPLE_DATA);
@@ -80,6 +81,7 @@ export default function App() {
             ["branches", "Branch Breakdown"],
             ["people", "People & Badges"],
             ["passport", "Belonging Passport"],
+            ["rsvp", "Event RSVP"],
           ].map(([id, label]) => (
             <button
               key={id}
@@ -113,6 +115,8 @@ export default function App() {
         )}
 
         {tab === "passport" && <PassportTab />}
+
+        {tab === "rsvp" && <RSVPTab />}
       </div>
 
       <footer className="max-w-7xl mx-auto px-4 py-10 text-xs text-neutral-500">

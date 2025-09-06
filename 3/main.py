@@ -20,6 +20,8 @@ from ai_assistant import VolunteerAIAssistant
 from matching_engine import VolunteerMatchingEngine
 from data_processor import VolunteerDataProcessor
 from database import VolunteerDatabase
+from calendar_service import CalendarService
+from reminder_service import ReminderService, start_reminder_service
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -41,6 +43,8 @@ app.add_middleware(
 # Global instances
 ai_assistant = VolunteerAIAssistant()
 database = VolunteerDatabase()
+calendar_service = CalendarService()
+reminder_service = None
 volunteer_data = None
 matching_engine = None
 
@@ -78,11 +82,35 @@ class FeedbackData(BaseModel):
     feedback_text: str = ""
     feedback_type: str = "general"
 
+class EventCreate(BaseModel):
+    title: str
+    description: Optional[str] = None
+    event_date: str  # ISO format datetime
+    end_date: Optional[str] = None
+    location: Optional[str] = None
+    branch: Optional[str] = None
+    category: Optional[str] = None
+    max_participants: Optional[int] = None
+    contact_email: Optional[str] = None
+    contact_phone: Optional[str] = None
+    requirements: Optional[Dict[str, Any]] = None
+
+class RSVPCreate(BaseModel):
+    event_id: str
+    email: str
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    notes: Optional[str] = None
+
+class RSVPUpdate(BaseModel):
+    status: str  # 'confirmed', 'tentative', 'declined', 'cancelled'
+    notes: Optional[str] = None
+
 # Initialize data on startup
 @app.on_event("startup")
 async def startup_event():
     """Initialize application data and models"""
-    global volunteer_data, matching_engine
+    global volunteer_data, matching_engine, reminder_service
     
     print("🚀 Starting Volunteer PathFinder AI Assistant...")
     
@@ -92,6 +120,13 @@ async def startup_event():
         print("✅ Database initialized")
     except Exception as e:
         print(f"⚠️  Database initialization note: {e}")
+    
+    # Initialize reminder service
+    try:
+        reminder_service = await start_reminder_service(database, calendar_service)
+        print("✅ Reminder service initialized")
+    except Exception as e:
+        print(f"⚠️  Reminder service initialization note: {e}")
     
     # Load and process volunteer data
     try:
@@ -632,6 +667,265 @@ async def get_analytics(days: int = 30) -> JSONResponse:
     except Exception as e:
         print(f"❌ Analytics error: {e}")
         raise HTTPException(status_code=500, detail="Analytics not available")
+
+# RSVP System Endpoints
+
+@app.post("/api/events")
+async def create_event(
+    event_data: EventCreate,
+    background_tasks: BackgroundTasks,
+    created_by: Optional[str] = None
+) -> JSONResponse:
+    """Create a new volunteer event"""
+    
+    try:
+        # Prepare event data
+        event_dict = event_data.dict()
+        if created_by:
+            event_dict['created_by'] = created_by
+            
+        # Create event in database
+        event = await database.create_event(event_dict)
+        
+        if event:
+            # Track event creation
+            background_tasks.add_task(
+                database.track_event,
+                "event_created",
+                {
+                    "event_title": event_data.title,
+                    "branch": event_data.branch,
+                    "category": event_data.category
+                },
+                created_by
+            )
+            
+            return JSONResponse(content={"event": event, "success": True})
+        else:
+            raise HTTPException(status_code=400, detail="Failed to create event")
+            
+    except Exception as e:
+        print(f"❌ Event creation error: {e}")
+        raise HTTPException(status_code=500, detail="Event creation failed")
+
+@app.get("/api/events")
+async def get_events(
+    branch: Optional[str] = None,
+    upcoming_only: bool = True
+) -> JSONResponse:
+    """Get volunteer events"""
+    
+    try:
+        events = await database.get_events(branch=branch, upcoming_only=upcoming_only)
+        
+        return JSONResponse(content={
+            "events": events,
+            "count": len(events),
+            "success": True
+        })
+        
+    except Exception as e:
+        print(f"❌ Get events error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get events")
+
+@app.get("/api/events/{event_id}")
+async def get_event(event_id: str) -> JSONResponse:
+    """Get a specific event with RSVP information"""
+    
+    try:
+        # Get event details
+        event = await database.get_event(event_id)
+        
+        if not event:
+            raise HTTPException(status_code=404, detail="Event not found")
+        
+        # Get RSVPs for this event
+        rsvps = await database.get_event_rsvps(event_id)
+        
+        # Count confirmed RSVPs
+        confirmed_count = len([r for r in rsvps if r.get('status') == 'confirmed'])
+        
+        return JSONResponse(content={
+            "event": event,
+            "rsvp_count": confirmed_count,
+            "max_participants": event.get('max_participants'),
+            "spots_remaining": (event.get('max_participants', 0) - confirmed_count) if event.get('max_participants') else None,
+            "success": True
+        })
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Get event error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get event")
+
+@app.post("/api/rsvp")
+async def create_rsvp(
+    rsvp_data: RSVPCreate,
+    background_tasks: BackgroundTasks,
+    user_id: Optional[str] = None
+) -> JSONResponse:
+    """Create one-click RSVP with automatic calendar invite"""
+    
+    try:
+        # Check if event exists
+        event = await database.get_event(rsvp_data.event_id)
+        if not event:
+            raise HTTPException(status_code=404, detail="Event not found")
+        
+        # Check if RSVP already exists
+        existing_rsvp = await database.get_rsvp(rsvp_data.event_id, rsvp_data.email)
+        if existing_rsvp:
+            return JSONResponse(content={
+                "message": "RSVP already exists",
+                "rsvp": existing_rsvp,
+                "success": True
+            })
+        
+        # Check capacity if max_participants is set
+        if event.get('max_participants'):
+            current_rsvps = await database.get_event_rsvps(rsvp_data.event_id)
+            confirmed_count = len([r for r in current_rsvps if r.get('status') == 'confirmed'])
+            
+            if confirmed_count >= event['max_participants']:
+                raise HTTPException(status_code=400, detail="Event is full")
+        
+        # Prepare RSVP data
+        rsvp_dict = rsvp_data.dict()
+        if user_id:
+            rsvp_dict['user_id'] = user_id
+        rsvp_dict['status'] = 'confirmed'  # Default status for one-click RSVP
+        
+        # Create RSVP in database
+        rsvp = await database.create_rsvp(rsvp_dict)
+        
+        if rsvp:
+            # Send calendar invite in background
+            background_tasks.add_task(
+                send_calendar_invite_task,
+                event,
+                rsvp
+            )
+            
+            # Schedule reminders in background
+            if reminder_service:
+                background_tasks.add_task(
+                    reminder_service.schedule_reminders_for_rsvp,
+                    rsvp,
+                    event
+                )
+            
+            # Track RSVP creation
+            background_tasks.add_task(
+                database.track_event,
+                "rsvp_created",
+                {
+                    "event_title": event['title'],
+                    "event_id": rsvp_data.event_id,
+                    "email": rsvp_data.email
+                },
+                user_id
+            )
+            
+            return JSONResponse(content={
+                "message": "RSVP confirmed! Calendar invite sent.",
+                "rsvp": rsvp,
+                "event": event,
+                "success": True
+            })
+        else:
+            raise HTTPException(status_code=400, detail="Failed to create RSVP")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ RSVP creation error: {e}")
+        raise HTTPException(status_code=500, detail="RSVP creation failed")
+
+@app.put("/api/rsvp/{rsvp_id}")
+async def update_rsvp(
+    rsvp_id: str,
+    rsvp_update: RSVPUpdate,
+    background_tasks: BackgroundTasks
+) -> JSONResponse:
+    """Update RSVP status"""
+    
+    try:
+        # Update RSVP status
+        success = await database.update_rsvp_status(rsvp_id, rsvp_update.status)
+        
+        if success:
+            # If cancelled, cancel reminders
+            if rsvp_update.status == 'cancelled' and reminder_service:
+                background_tasks.add_task(
+                    reminder_service.cancel_reminders_for_rsvp,
+                    rsvp_id
+                )
+            
+            # Track status update
+            background_tasks.add_task(
+                database.track_event,
+                "rsvp_updated",
+                {
+                    "rsvp_id": rsvp_id,
+                    "new_status": rsvp_update.status
+                }
+            )
+            
+            return JSONResponse(content={
+                "message": f"RSVP status updated to {rsvp_update.status}",
+                "success": True
+            })
+        else:
+            raise HTTPException(status_code=400, detail="Failed to update RSVP")
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ RSVP update error: {e}")
+        raise HTTPException(status_code=500, detail="RSVP update failed")
+
+@app.get("/api/events/{event_id}/rsvps")
+async def get_event_rsvps(event_id: str) -> JSONResponse:
+    """Get all RSVPs for an event (admin endpoint)"""
+    
+    try:
+        rsvps = await database.get_event_rsvps(event_id)
+        
+        # Group by status
+        status_counts = {}
+        for rsvp in rsvps:
+            status = rsvp.get('status', 'unknown')
+            status_counts[status] = status_counts.get(status, 0) + 1
+        
+        return JSONResponse(content={
+            "rsvps": rsvps,
+            "total_count": len(rsvps),
+            "status_counts": status_counts,
+            "success": True
+        })
+        
+    except Exception as e:
+        print(f"❌ Get event RSVPs error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get event RSVPs")
+
+# Background task for sending calendar invites
+async def send_calendar_invite_task(event_data: Dict[str, Any], rsvp_data: Dict[str, Any]):
+    """Background task to send calendar invite"""
+    try:
+        success = await calendar_service.send_calendar_invite(event_data, rsvp_data)
+        
+        if success:
+            # Mark calendar invite as sent
+            await database.mark_calendar_invite_sent(
+                rsvp_data['id'], 
+                f"cal_{rsvp_data['id']}"
+            )
+            print(f"✅ Calendar invite sent for event: {event_data['title']}")
+        else:
+            print(f"⚠️ Failed to send calendar invite for event: {event_data['title']}")
+    except Exception as e:
+        print(f"❌ Error in calendar invite task: {e}")
 
 # Resources and information
 @app.get("/api/resources")

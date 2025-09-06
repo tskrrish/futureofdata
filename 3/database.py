@@ -158,8 +158,61 @@ class VolunteerDatabase:
         );
         """
         
+        # Events table for RSVP system
+        events_sql = """
+        CREATE TABLE IF NOT EXISTS events (
+            id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+            title VARCHAR(200) NOT NULL,
+            description TEXT,
+            event_date TIMESTAMP WITH TIME ZONE NOT NULL,
+            end_date TIMESTAMP WITH TIME ZONE,
+            location VARCHAR(200),
+            branch VARCHAR(100),
+            category VARCHAR(100),
+            max_participants INTEGER,
+            contact_email VARCHAR(255),
+            contact_phone VARCHAR(20),
+            requirements JSONB,
+            created_by UUID REFERENCES users(id),
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+        """
+        
+        # RSVPs table
+        rsvps_sql = """
+        CREATE TABLE IF NOT EXISTS rsvps (
+            id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+            event_id UUID REFERENCES events(id) ON DELETE CASCADE,
+            user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+            email VARCHAR(255) NOT NULL,
+            first_name VARCHAR(100),
+            last_name VARCHAR(100),
+            status VARCHAR(20) DEFAULT 'confirmed', -- 'confirmed', 'tentative', 'declined', 'cancelled'
+            calendar_invite_sent BOOLEAN DEFAULT FALSE,
+            calendar_invite_id VARCHAR(255),
+            notes TEXT,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            UNIQUE(event_id, email)
+        );
+        """
+        
+        # Reminders table
+        reminders_sql = """
+        CREATE TABLE IF NOT EXISTS reminders (
+            id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+            rsvp_id UUID REFERENCES rsvps(id) ON DELETE CASCADE,
+            reminder_type VARCHAR(50), -- 'email', 'sms', 'calendar'
+            reminder_time TIMESTAMP WITH TIME ZONE NOT NULL,
+            sent BOOLEAN DEFAULT FALSE,
+            sent_at TIMESTAMP WITH TIME ZONE,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+        """
+        
         # Execute table creation (Note: In production, use proper migrations)
-        tables = [users_sql, preferences_sql, conversations_sql, messages_sql, matches_sql, feedback_sql, analytics_sql]
+        tables = [users_sql, preferences_sql, conversations_sql, messages_sql, matches_sql, feedback_sql, analytics_sql, events_sql, rsvps_sql, reminders_sql]
         
         print("🗄️  Setting up database tables...")
         for sql in tables:
@@ -528,6 +581,207 @@ class VolunteerDatabase:
         except Exception as e:
             print(f"❌ Error exporting data: {e}")
             return {}
+    
+    # RSVP System Methods
+    async def create_event(self, event_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Create a new event"""
+        if not self._is_available():
+            logger.warning("Database not available, skipping event creation")
+            return None
+            
+        try:
+            event_data['created_at'] = datetime.now().isoformat()
+            event_data['updated_at'] = datetime.now().isoformat()
+            
+            response = self.supabase.table('events').insert(event_data).execute()
+            
+            if response.data and len(response.data) > 0:
+                logger.info(f"✅ Created event: {event_data.get('title', 'unknown')}")
+                return response.data[0]
+            else:
+                logger.error(f"Failed to create event: {response}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"❌ Error creating event: {e}")
+            return None
+    
+    async def get_event(self, event_id: str) -> Optional[Dict[str, Any]]:
+        """Get an event by ID"""
+        if not self._is_available():
+            return None
+            
+        try:
+            response = self.supabase.table('events').select('*').eq('id', event_id).single().execute()
+            return response.data if response.data else None
+        except Exception as e:
+            logger.error(f"❌ Error getting event: {e}")
+            return None
+    
+    async def get_events(self, branch: str = None, upcoming_only: bool = True) -> List[Dict[str, Any]]:
+        """Get events, optionally filtered by branch"""
+        if not self._is_available():
+            return []
+            
+        try:
+            query = self.supabase.table('events').select('*')
+            
+            if branch:
+                query = query.eq('branch', branch)
+                
+            if upcoming_only:
+                query = query.gte('event_date', datetime.now().isoformat())
+            
+            response = query.order('event_date').execute()
+            return response.data or []
+        except Exception as e:
+            logger.error(f"❌ Error getting events: {e}")
+            return []
+    
+    async def create_rsvp(self, rsvp_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Create a new RSVP"""
+        if not self._is_available():
+            logger.warning("Database not available, skipping RSVP creation")
+            return None
+            
+        try:
+            rsvp_data['created_at'] = datetime.now().isoformat()
+            rsvp_data['updated_at'] = datetime.now().isoformat()
+            
+            response = self.supabase.table('rsvps').insert(rsvp_data).execute()
+            
+            if response.data and len(response.data) > 0:
+                logger.info(f"✅ Created RSVP: {rsvp_data.get('email', 'unknown')}")
+                return response.data[0]
+            else:
+                logger.error(f"Failed to create RSVP: {response}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"❌ Error creating RSVP: {e}")
+            return None
+    
+    async def get_rsvp(self, event_id: str, email: str) -> Optional[Dict[str, Any]]:
+        """Get an RSVP by event and email"""
+        if not self._is_available():
+            return None
+            
+        try:
+            response = self.supabase.table('rsvps')\
+                .select('*')\
+                .eq('event_id', event_id)\
+                .eq('email', email)\
+                .single()\
+                .execute()
+            return response.data if response.data else None
+        except Exception as e:
+            logger.error(f"❌ Error getting RSVP: {e}")
+            return None
+    
+    async def get_event_rsvps(self, event_id: str) -> List[Dict[str, Any]]:
+        """Get all RSVPs for an event"""
+        if not self._is_available():
+            return []
+            
+        try:
+            response = self.supabase.table('rsvps')\
+                .select('*')\
+                .eq('event_id', event_id)\
+                .order('created_at')\
+                .execute()
+            return response.data or []
+        except Exception as e:
+            logger.error(f"❌ Error getting event RSVPs: {e}")
+            return []
+    
+    async def update_rsvp_status(self, rsvp_id: str, status: str) -> bool:
+        """Update RSVP status"""
+        if not self._is_available():
+            return False
+            
+        try:
+            response = self.supabase.table('rsvps')\
+                .update({'status': status, 'updated_at': datetime.now().isoformat()})\
+                .eq('id', rsvp_id)\
+                .execute()
+            return len(response.data) > 0
+        except Exception as e:
+            logger.error(f"❌ Error updating RSVP status: {e}")
+            return False
+    
+    async def mark_calendar_invite_sent(self, rsvp_id: str, calendar_invite_id: str = None) -> bool:
+        """Mark calendar invite as sent"""
+        if not self._is_available():
+            return False
+            
+        try:
+            update_data = {
+                'calendar_invite_sent': True,
+                'updated_at': datetime.now().isoformat()
+            }
+            if calendar_invite_id:
+                update_data['calendar_invite_id'] = calendar_invite_id
+                
+            response = self.supabase.table('rsvps')\
+                .update(update_data)\
+                .eq('id', rsvp_id)\
+                .execute()
+            return len(response.data) > 0
+        except Exception as e:
+            logger.error(f"❌ Error marking calendar invite sent: {e}")
+            return False
+    
+    async def create_reminder(self, reminder_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Create a reminder"""
+        if not self._is_available():
+            return None
+            
+        try:
+            reminder_data['created_at'] = datetime.now().isoformat()
+            
+            response = self.supabase.table('reminders').insert(reminder_data).execute()
+            
+            if response.data and len(response.data) > 0:
+                logger.info(f"✅ Created reminder: {reminder_data.get('reminder_type', 'unknown')}")
+                return response.data[0]
+            else:
+                logger.error(f"Failed to create reminder: {response}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"❌ Error creating reminder: {e}")
+            return None
+    
+    async def get_pending_reminders(self) -> List[Dict[str, Any]]:
+        """Get reminders that need to be sent"""
+        if not self._is_available():
+            return []
+            
+        try:
+            response = self.supabase.table('reminders')\
+                .select('*, rsvps(*, events(*))')\
+                .eq('sent', False)\
+                .lte('reminder_time', datetime.now().isoformat())\
+                .execute()
+            return response.data or []
+        except Exception as e:
+            logger.error(f"❌ Error getting pending reminders: {e}")
+            return []
+    
+    async def mark_reminder_sent(self, reminder_id: str) -> bool:
+        """Mark reminder as sent"""
+        if not self._is_available():
+            return False
+            
+        try:
+            response = self.supabase.table('reminders')\
+                .update({'sent': True, 'sent_at': datetime.now().isoformat()})\
+                .eq('id', reminder_id)\
+                .execute()
+            return len(response.data) > 0
+        except Exception as e:
+            logger.error(f"❌ Error marking reminder sent: {e}")
+            return False
 
 # Usage example and testing
 async def test_database():
