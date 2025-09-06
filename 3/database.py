@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 class VolunteerDatabase:
     def __init__(self):
         """Initialize Supabase clients with proper error handling"""
+        self.audit_logger = None  # Will be set after initialization
         try:
             if not settings.SUPABASE_URL or not settings.SUPABASE_KEY:
                 logger.warning("Supabase credentials not configured. Database features will be disabled.")
@@ -68,6 +69,8 @@ class VolunteerDatabase:
             zip_code VARCHAR(10),
             is_ymca_member BOOLEAN DEFAULT FALSE,
             member_branch VARCHAR(100),
+            sso_provider VARCHAR(20), -- 'google', 'microsoft', null for regular
+            sso_id VARCHAR(255), -- SSO provider user ID
             created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
             updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
         );
@@ -146,6 +149,37 @@ class VolunteerDatabase:
         );
         """
         
+        # Message templates table
+        message_templates_sql = """
+        CREATE TABLE IF NOT EXISTS message_templates (
+            id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+            name VARCHAR(100) NOT NULL,
+            description TEXT,
+            category VARCHAR(50), -- 'welcome', 'follow_up', 'reminder', 'thank_you', 'general'
+            subject VARCHAR(200),
+            content TEXT NOT NULL,
+            merge_fields JSONB, -- Available merge fields for this template
+            is_active BOOLEAN DEFAULT TRUE,
+            created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+        """
+        
+        # Template usage tracking table
+        template_usage_sql = """
+        CREATE TABLE IF NOT EXISTS template_usage (
+            id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+            template_id UUID REFERENCES message_templates(id) ON DELETE CASCADE,
+            user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+            recipient_email VARCHAR(255),
+            rendered_subject VARCHAR(200),
+            rendered_content TEXT,
+            merge_data JSONB, -- The actual data used for merge fields
+            sent_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+        """
+        
         # Analytics table
         analytics_sql = """
         CREATE TABLE IF NOT EXISTS analytics_events (
@@ -157,9 +191,66 @@ class VolunteerDatabase:
             created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
         );
         """
+ 
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+        """
+        
+
+        );
+        """
+        
+        # SMS messages table
+        sms_messages_sql = """
+        CREATE TABLE IF NOT EXISTS sms_messages (
+            id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+            user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+            phone_number VARCHAR(20),
+            message_content TEXT,
+            sms_type VARCHAR(30), -- 'reminder', 'confirmation', 'welcome', 'follow_up', 'keyword_response'
+            direction VARCHAR(10), -- 'inbound', 'outbound'  
+            status VARCHAR(20), -- 'sent', 'received', 'failed', 'delivered'
+            twilio_sid VARCHAR(100),
+            error_message TEXT,
+            metadata JSONB,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+        """
+        
+        # SMS reminders/schedule table
+        sms_reminders_sql = """
+        CREATE TABLE IF NOT EXISTS sms_reminders (
+            id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+            user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+            phone_number VARCHAR(20),
+            reminder_type VARCHAR(30),
+            opportunity_data JSONB,
+            scheduled_for TIMESTAMP WITH TIME ZONE,
+            sent_at TIMESTAMP WITH TIME ZONE,
+            status VARCHAR(20) DEFAULT 'scheduled', -- 'scheduled', 'sent', 'failed', 'cancelled'
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+        """
+        
+        # SMS preferences table
+        sms_preferences_sql = """
+        CREATE TABLE IF NOT EXISTS sms_preferences (
+            id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+            user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+            phone_number VARCHAR(20),
+            is_subscribed BOOLEAN DEFAULT TRUE,
+            preferences JSONB, -- reminder types, frequency, etc.
+            unsubscribed_at TIMESTAMP WITH TIME ZONE,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+        """
         
         # Execute table creation (Note: In production, use proper migrations)
-        tables = [users_sql, preferences_sql, conversations_sql, messages_sql, matches_sql, feedback_sql, analytics_sql]
+
         
         print("🗄️  Setting up database tables...")
         for sql in tables:
@@ -171,6 +262,10 @@ class VolunteerDatabase:
                 print(f"  ⚠️  Table setup note: {e}")
         
         print("✅ Database schema ready! Run SQL commands in Supabase dashboard.")
+    
+    def set_audit_logger(self, audit_logger):
+        """Set the audit logger instance"""
+        self.audit_logger = audit_logger
     
     # User Management
     async def create_user(self, user_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -187,8 +282,25 @@ class VolunteerDatabase:
             response = self.supabase.table('users').insert(user_data).execute()
             
             if response.data and len(response.data) > 0:
+                created_user = response.data[0]
                 logger.info(f"✅ Created user: {user_data.get('email', 'unknown')}")
-                return response.data[0]
+                
+                # Log audit entry
+                if self.audit_logger:
+                    try:
+                        from audit_logger import AuditAction, AuditResource
+                        await self.audit_logger.log_audit_entry(
+                            action=AuditAction.CREATE,
+                            resource=AuditResource.USER,
+                            user_id=created_user.get('id'),
+                            resource_id=created_user.get('id'),
+                            new_values=user_data,
+                            metadata={'operation': 'create_user'}
+                        )
+                    except Exception as audit_error:
+                        logger.error(f"❌ Error logging audit entry: {audit_error}")
+                
+                return created_user
             else:
                 logger.error(f"Failed to create user: {response}")
                 return None
@@ -496,7 +608,13 @@ class VolunteerDatabase:
         except Exception as e:
             print(f"❌ Error getting popular matches: {e}")
             return []
-    
+
+                'created_at': datetime.now().isoformat(),
+                'updated_at': datetime.now().isoformat()
+            }
+            
+
+
     # Data Export
     async def export_volunteer_data(self) -> Dict[str, pd.DataFrame]:
         """Export all volunteer data for analysis"""
@@ -504,30 +622,7 @@ class VolunteerDatabase:
             tables = {}
             
             # Users
-            users_result = self.supabase.table('users').select('*').execute()
-            tables['users'] = pd.DataFrame(users_result.data)
-            
-            # Preferences
-            prefs_result = self.supabase.table('user_preferences').select('*').execute()
-            tables['preferences'] = pd.DataFrame(prefs_result.data)
-            
-            # Matches
-            matches_result = self.supabase.table('volunteer_matches').select('*').execute()
-            tables['matches'] = pd.DataFrame(matches_result.data)
-            
-            # Messages
-            messages_result = self.supabase.table('messages').select('*').execute()
-            tables['messages'] = pd.DataFrame(messages_result.data)
-            
-            # Feedback
-            feedback_result = self.supabase.table('volunteer_feedback').select('*').execute()
-            tables['feedback'] = pd.DataFrame(feedback_result.data)
-            
-            print(f"📊 Exported data: {len(tables)} tables")
-            return tables
-        except Exception as e:
-            print(f"❌ Error exporting data: {e}")
-            return {}
+            users_result = 
 
 # Usage example and testing
 async def test_database():

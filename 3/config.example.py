@@ -27,6 +27,28 @@ class Settings:
     VOLUNTEER_INTEREST_FORM: str = 'https://ymcacincinnati.qualtrics.com/jfe/form/SV_0JklTjQEJTQmS2i'
 
     VOLUNTEER_DATA_PATH: str = 'Y Volunteer Raw Data - Jan- August 2025.xlsx'
+    
+    # Google Calendar Integration
+    BASE_URL: str = os.getenv('BASE_URL', 'http://localhost:8000')
+    GOOGLE_CREDENTIALS_PATH: str = 'google_credentials.json'
+
+    # QuickBooks Integration
+    QUICKBOOKS_CLIENT_ID: str = os.getenv('QUICKBOOKS_CLIENT_ID', '')
+    QUICKBOOKS_CLIENT_SECRET: str = os.getenv('QUICKBOOKS_CLIENT_SECRET', '')
+    QUICKBOOKS_REDIRECT_URI: str = os.getenv('QUICKBOOKS_REDIRECT_URI', 'http://localhost:8000/api/integration/quickbooks/callback')
+    QUICKBOOKS_DEFAULT_EXPENSE_ACCOUNT: str = os.getenv('QUICKBOOKS_DEFAULT_EXPENSE_ACCOUNT', '1')
+
+    # Xero Integration
+    XERO_CLIENT_ID: str = os.getenv('XERO_CLIENT_ID', '')
+    XERO_CLIENT_SECRET: str = os.getenv('XERO_CLIENT_SECRET', '')
+    XERO_REDIRECT_URI: str = os.getenv('XERO_REDIRECT_URI', 'http://localhost:8000/api/integration/xero/callback')
+    XERO_DEFAULT_EXPENSE_ACCOUNT: str = os.getenv('XERO_DEFAULT_EXPENSE_ACCOUNT', '400')
+
+    # Twilio SMS Configuration
+    TWILIO_ACCOUNT_SID: str = os.getenv('TWILIO_ACCOUNT_SID', '')
+    TWILIO_AUTH_TOKEN: str = os.getenv('TWILIO_AUTH_TOKEN', '')
+    TWILIO_PHONE_NUMBER: str = os.getenv('TWILIO_PHONE_NUMBER', '')
+    SMS_WEBHOOK_URL: str = os.getenv('SMS_WEBHOOK_URL', 'http://localhost:8000/webhooks/sms')
 
     # Airtable/Notion Sync Configuration
     AIRTABLE_API_KEY: str = os.getenv('AIRTABLE_API_KEY', '')
