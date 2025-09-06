@@ -11,3 +11,8 @@ export { OverviewTab } from "./tabs/OverviewTab";
 export { BranchesTab } from "./tabs/BranchesTab";
 export { PeopleTab } from "./tabs/PeopleTab";
 export { PassportTab } from "./tabs/PassportTab";
+export { CapacityTab } from "./tabs/CapacityTab";
+
+export { EventCard } from "./capacity/EventCard";
+export { CapacityAlert } from "./capacity/CapacityAlert";
+export { StaffUtilizationChart } from "./capacity/StaffUtilizationChart";
