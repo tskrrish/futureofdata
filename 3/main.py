@@ -20,6 +20,7 @@ from ai_assistant import VolunteerAIAssistant
 from matching_engine import VolunteerMatchingEngine
 from data_processor import VolunteerDataProcessor
 from database import VolunteerDatabase
+from recurring_role_manager import RecurringRoleManager
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -43,6 +44,7 @@ ai_assistant = VolunteerAIAssistant()
 database = VolunteerDatabase()
 volunteer_data = None
 matching_engine = None
+recurring_role_manager = None
 
 # Pydantic models
 class UserProfile(BaseModel):
@@ -78,11 +80,33 @@ class FeedbackData(BaseModel):
     feedback_text: str = ""
     feedback_type: str = "general"
 
+class RecurringShiftCreate(BaseModel):
+    name: str
+    description: Optional[str] = ""
+    branch: str
+    category: str
+    day_of_week: int  # 0=Monday, 6=Sunday
+    start_time: str   # "09:00"
+    end_time: str     # "12:00"
+    required_volunteers: int = 1
+    required_skills: List[str] = []
+    recurrence_pattern: str = "weekly"  # weekly, biweekly, monthly
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+
+class VolunteerAvailabilityData(BaseModel):
+    volunteer_id: str
+    availability: List[Dict[str, Any]]
+
+class ShiftAssignmentRequest(BaseModel):
+    weeks_ahead: int = 4
+    auto_resolve_conflicts: bool = True
+
 # Initialize data on startup
 @app.on_event("startup")
 async def startup_event():
     """Initialize application data and models"""
-    global volunteer_data, matching_engine
+    global volunteer_data, matching_engine, recurring_role_manager
     
     print("🚀 Starting Volunteer PathFinder AI Assistant...")
     
@@ -104,8 +128,12 @@ async def startup_event():
             matching_engine = VolunteerMatchingEngine(volunteer_data)
             matching_engine.train_models()
             
+            # Initialize recurring role manager
+            recurring_role_manager = RecurringRoleManager(volunteer_data, database)
+            
             print(f"✅ Loaded {len(volunteer_data['volunteers'])} volunteer profiles")
             print(f"✅ Loaded {len(volunteer_data['projects'])} projects")
+            print("✅ Recurring role manager initialized")
         else:
             print(f"⚠️  Volunteer data file not found: {settings.VOLUNTEER_DATA_PATH}")
     except Exception as e:
@@ -677,6 +705,254 @@ async def get_resources() -> JSONResponse:
     }
     
     return JSONResponse(content=resources)
+
+# Recurring Role Management Endpoints
+@app.post("/api/recurring-shifts")
+async def create_recurring_shift(
+    shift_data: RecurringShiftCreate,
+    background_tasks: BackgroundTasks
+) -> JSONResponse:
+    """Create a new recurring shift"""
+    
+    if not recurring_role_manager:
+        raise HTTPException(status_code=503, detail="Recurring role manager not available")
+    
+    try:
+        # Convert Pydantic model to dict
+        shift_dict = shift_data.dict()
+        
+        # Create shift in the manager
+        shift_id = recurring_role_manager.create_recurring_shift(shift_dict)
+        
+        # Save to database
+        background_tasks.add_task(
+            database.create_recurring_shift,
+            shift_dict
+        )
+        
+        return JSONResponse(content={
+            "success": True,
+            "shift_id": shift_id,
+            "message": f"Created recurring shift: {shift_data.name}"
+        })
+        
+    except Exception as e:
+        print(f"❌ Error creating recurring shift: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create recurring shift")
+
+@app.get("/api/recurring-shifts")
+async def get_recurring_shifts(active_only: bool = True) -> JSONResponse:
+    """Get all recurring shifts"""
+    
+    try:
+        # Get shifts from database
+        shifts = await database.get_recurring_shifts(active_only=active_only)
+        
+        return JSONResponse(content={
+            "shifts": shifts,
+            "count": len(shifts)
+        })
+        
+    except Exception as e:
+        print(f"❌ Error getting recurring shifts: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get recurring shifts")
+
+@app.post("/api/volunteer-availability")
+async def set_volunteer_availability(
+    availability_data: VolunteerAvailabilityData,
+    background_tasks: BackgroundTasks
+) -> JSONResponse:
+    """Set volunteer availability preferences"""
+    
+    if not recurring_role_manager:
+        raise HTTPException(status_code=503, detail="Recurring role manager not available")
+    
+    try:
+        # Add to role manager
+        success = recurring_role_manager.add_volunteer_availability(
+            availability_data.volunteer_id,
+            availability_data.availability
+        )
+        
+        if success:
+            # Save to database
+            background_tasks.add_task(
+                database.save_volunteer_availability,
+                availability_data.volunteer_id,
+                availability_data.availability
+            )
+            
+            return JSONResponse(content={
+                "success": True,
+                "message": f"Updated availability for volunteer {availability_data.volunteer_id}"
+            })
+        else:
+            raise HTTPException(status_code=400, detail="Failed to update availability")
+        
+    except Exception as e:
+        print(f"❌ Error setting volunteer availability: {e}")
+        raise HTTPException(status_code=500, detail="Failed to set volunteer availability")
+
+@app.get("/api/volunteer-availability/{volunteer_id}")
+async def get_volunteer_availability(volunteer_id: str) -> JSONResponse:
+    """Get volunteer availability preferences"""
+    
+    try:
+        availability = await database.get_volunteer_availability(volunteer_id)
+        
+        return JSONResponse(content={
+            "volunteer_id": volunteer_id,
+            "availability": availability
+        })
+        
+    except Exception as e:
+        print(f"❌ Error getting volunteer availability: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get volunteer availability")
+
+@app.post("/api/generate-assignments")
+async def generate_shift_assignments(
+    request: ShiftAssignmentRequest,
+    background_tasks: BackgroundTasks
+) -> JSONResponse:
+    """Generate shift assignments with conflict detection"""
+    
+    if not recurring_role_manager:
+        raise HTTPException(status_code=503, detail="Recurring role manager not available")
+    
+    try:
+        # Generate assignments
+        assignments = recurring_role_manager.generate_shift_assignments(request.weeks_ahead)
+        
+        # Save assignments to database
+        for shift_id, shift_assignments in assignments.items():
+            for assignment in shift_assignments:
+                background_tasks.add_task(
+                    database.save_shift_assignment,
+                    {
+                        'shift_id': assignment.shift_id,
+                        'volunteer_id': assignment.volunteer_id,
+                        'assignment_date': assignment.assignment_date.isoformat(),
+                        'status': assignment.status.value,
+                        'confidence_score': assignment.confidence_score
+                    }
+                )
+        
+        # Get summary
+        summary = recurring_role_manager.get_assignment_summary(request.weeks_ahead)
+        
+        # Save conflicts to database
+        for conflict_key, conflicts in recurring_role_manager.conflicts.items():
+            for conflict in conflicts:
+                background_tasks.add_task(
+                    database.save_shift_conflict,
+                    {
+                        'shift_id': conflict.shift_id,
+                        'volunteer_id': conflict.volunteer_id,
+                        'conflict_type': conflict.type.value,
+                        'description': conflict.description,
+                        'severity': conflict.severity,
+                        'resolution_suggestions': conflict.resolution_suggestions
+                    }
+                )
+        
+        # Auto-resolve conflicts if requested
+        if request.auto_resolve_conflicts:
+            for shift_id in recurring_role_manager.recurring_shifts.keys():
+                background_tasks.add_task(
+                    _resolve_shift_conflicts,
+                    shift_id
+                )
+        
+        return JSONResponse(content={
+            "success": True,
+            "assignments_generated": summary["total_assignments"],
+            "fill_rate": summary["fill_rate"],
+            "total_conflicts": summary["total_conflicts"],
+            "weeks_ahead": request.weeks_ahead,
+            "summary": summary
+        })
+        
+    except Exception as e:
+        print(f"❌ Error generating assignments: {e}")
+        raise HTTPException(status_code=500, detail="Failed to generate assignments")
+
+@app.get("/api/shift-assignments")
+async def get_shift_assignments(
+    shift_id: Optional[str] = None,
+    volunteer_id: Optional[str] = None,
+    assignment_date: Optional[str] = None
+) -> JSONResponse:
+    """Get shift assignments with optional filters"""
+    
+    try:
+        assignments = await database.get_shift_assignments(
+            shift_id=shift_id,
+            volunteer_id=volunteer_id,
+            assignment_date=assignment_date
+        )
+        
+        return JSONResponse(content={
+            "assignments": assignments,
+            "count": len(assignments)
+        })
+        
+    except Exception as e:
+        print(f"❌ Error getting shift assignments: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get shift assignments")
+
+@app.get("/api/shift-conflicts")
+async def get_shift_conflicts(
+    shift_id: Optional[str] = None,
+    resolved: Optional[bool] = None
+) -> JSONResponse:
+    """Get shift conflicts with optional filters"""
+    
+    try:
+        conflicts = await database.get_shift_conflicts(
+            shift_id=shift_id,
+            resolved=resolved
+        )
+        
+        return JSONResponse(content={
+            "conflicts": conflicts,
+            "count": len(conflicts)
+        })
+        
+    except Exception as e:
+        print(f"❌ Error getting shift conflicts: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get shift conflicts")
+
+@app.post("/api/resolve-conflict/{conflict_id}")
+async def resolve_conflict(
+    conflict_id: str,
+    resolution_notes: str
+) -> JSONResponse:
+    """Mark a shift conflict as resolved"""
+    
+    try:
+        success = await database.resolve_shift_conflict(conflict_id, resolution_notes)
+        
+        if success:
+            return JSONResponse(content={
+                "success": True,
+                "message": "Conflict resolved successfully"
+            })
+        else:
+            raise HTTPException(status_code=404, detail="Conflict not found")
+        
+    except Exception as e:
+        print(f"❌ Error resolving conflict: {e}")
+        raise HTTPException(status_code=500, detail="Failed to resolve conflict")
+
+# Background task helper for conflict resolution
+async def _resolve_shift_conflicts(shift_id: str):
+    """Background task to automatically resolve conflicts"""
+    if recurring_role_manager:
+        try:
+            result = recurring_role_manager.resolve_conflicts(shift_id)
+            print(f"Auto-resolved {result.get('conflicts_resolved', 0)} conflicts for shift {shift_id}")
+        except Exception as e:
+            print(f"❌ Error auto-resolving conflicts: {e}")
 
 # Main web interface
 @app.get("/", response_class=HTMLResponse)

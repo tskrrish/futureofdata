@@ -158,8 +158,78 @@ class VolunteerDatabase:
         );
         """
         
+        # Recurring shifts table
+        recurring_shifts_sql = """
+        CREATE TABLE IF NOT EXISTS recurring_shifts (
+            id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+            name VARCHAR(200) NOT NULL,
+            description TEXT,
+            branch VARCHAR(100) NOT NULL,
+            category VARCHAR(100) NOT NULL,
+            day_of_week INTEGER NOT NULL, -- 0=Monday, 6=Sunday
+            start_time TIME NOT NULL,
+            end_time TIME NOT NULL,
+            required_volunteers INTEGER DEFAULT 1,
+            required_skills JSONB,
+            recurrence_pattern VARCHAR(20) DEFAULT 'weekly', -- weekly, biweekly, monthly
+            start_date DATE NOT NULL,
+            end_date DATE,
+            active BOOLEAN DEFAULT TRUE,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+        """
+        
+        # Volunteer availability table
+        volunteer_availability_sql = """
+        CREATE TABLE IF NOT EXISTS volunteer_availability (
+            id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+            volunteer_id UUID REFERENCES users(id) ON DELETE CASCADE,
+            day_of_week INTEGER NOT NULL, -- 0=Monday, 6=Sunday
+            start_time TIME NOT NULL,
+            end_time TIME NOT NULL,
+            preferred BOOLEAN DEFAULT FALSE,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+        """
+        
+        # Shift assignments table
+        shift_assignments_sql = """
+        CREATE TABLE IF NOT EXISTS shift_assignments (
+            id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+            shift_id UUID REFERENCES recurring_shifts(id) ON DELETE CASCADE,
+            volunteer_id UUID REFERENCES users(id) ON DELETE CASCADE,
+            assignment_date DATE NOT NULL,
+            status VARCHAR(20) DEFAULT 'assigned', -- assigned, conflict, filled, cancelled
+            confidence_score DECIMAL(3,2) DEFAULT 0.00,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            UNIQUE(shift_id, volunteer_id, assignment_date)
+        );
+        """
+        
+        # Shift conflicts table
+        shift_conflicts_sql = """
+        CREATE TABLE IF NOT EXISTS shift_conflicts (
+            id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+            shift_id UUID REFERENCES recurring_shifts(id) ON DELETE CASCADE,
+            volunteer_id UUID REFERENCES users(id) ON DELETE CASCADE,
+            conflict_type VARCHAR(50) NOT NULL, -- time_overlap, volunteer_unavailable, etc.
+            description TEXT NOT NULL,
+            severity VARCHAR(20) DEFAULT 'medium', -- low, medium, high
+            resolution_suggestions JSONB,
+            resolved BOOLEAN DEFAULT FALSE,
+            resolution_notes TEXT,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            resolved_at TIMESTAMP WITH TIME ZONE
+        );
+        """
+        
         # Execute table creation (Note: In production, use proper migrations)
-        tables = [users_sql, preferences_sql, conversations_sql, messages_sql, matches_sql, feedback_sql, analytics_sql]
+        tables = [users_sql, preferences_sql, conversations_sql, messages_sql, matches_sql, 
+                 feedback_sql, analytics_sql, recurring_shifts_sql, volunteer_availability_sql, 
+                 shift_assignments_sql, shift_conflicts_sql]
         
         print("🗄️  Setting up database tables...")
         for sql in tables:
@@ -497,6 +567,270 @@ class VolunteerDatabase:
             print(f"❌ Error getting popular matches: {e}")
             return []
     
+    # Recurring Shift Management
+    async def create_recurring_shift(self, shift_data: Dict[str, Any]) -> Optional[str]:
+        """Create a new recurring shift"""
+        if not self._is_available():
+            logger.warning("Database not available, skipping shift creation")
+            return None
+        
+        try:
+            shift_record = {
+                'name': shift_data['name'],
+                'description': shift_data.get('description', ''),
+                'branch': shift_data['branch'],
+                'category': shift_data['category'],
+                'day_of_week': shift_data['day_of_week'],
+                'start_time': shift_data['start_time'],
+                'end_time': shift_data['end_time'],
+                'required_volunteers': shift_data.get('required_volunteers', 1),
+                'required_skills': json.dumps(shift_data.get('required_skills', [])),
+                'recurrence_pattern': shift_data.get('recurrence_pattern', 'weekly'),
+                'start_date': shift_data.get('start_date', datetime.now().date().isoformat()),
+                'end_date': shift_data.get('end_date'),
+                'active': shift_data.get('active', True),
+                'created_at': datetime.now().isoformat()
+            }
+            
+            result = self.supabase.table('recurring_shifts').insert(shift_record).execute()
+            
+            if result.data and len(result.data) > 0:
+                logger.info(f"Created recurring shift: {shift_data['name']}")
+                return result.data[0]['id']
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error creating recurring shift: {e}")
+            return None
+
+    async def get_recurring_shifts(self, active_only: bool = True) -> List[Dict[str, Any]]:
+        """Get all recurring shifts"""
+        if not self._is_available():
+            return []
+        
+        try:
+            query = self.supabase.table('recurring_shifts').select('*')
+            
+            if active_only:
+                query = query.eq('active', True)
+            
+            result = query.execute()
+            
+            shifts = []
+            for shift in result.data:
+                if shift.get('required_skills'):
+                    shift['required_skills'] = json.loads(shift['required_skills'])
+                shifts.append(shift)
+            
+            return shifts
+            
+        except Exception as e:
+            logger.error(f"Error getting recurring shifts: {e}")
+            return []
+
+    async def update_recurring_shift(self, shift_id: str, updates: Dict[str, Any]) -> bool:
+        """Update a recurring shift"""
+        if not self._is_available():
+            return False
+        
+        try:
+            updates['updated_at'] = datetime.now().isoformat()
+            
+            if 'required_skills' in updates:
+                updates['required_skills'] = json.dumps(updates['required_skills'])
+            
+            result = self.supabase.table('recurring_shifts')\
+                .update(updates)\
+                .eq('id', shift_id)\
+                .execute()
+            
+            return len(result.data) > 0
+            
+        except Exception as e:
+            logger.error(f"Error updating recurring shift: {e}")
+            return False
+
+    async def save_volunteer_availability(self, volunteer_id: str, availability: List[Dict[str, Any]]) -> bool:
+        """Save volunteer availability preferences"""
+        if not self._is_available():
+            return False
+        
+        try:
+            # Clear existing availability for this volunteer
+            self.supabase.table('volunteer_availability')\
+                .delete()\
+                .eq('volunteer_id', volunteer_id)\
+                .execute()
+            
+            # Insert new availability records
+            availability_records = []
+            for avail in availability:
+                record = {
+                    'volunteer_id': volunteer_id,
+                    'day_of_week': avail['day_of_week'],
+                    'start_time': avail['start_time'],
+                    'end_time': avail['end_time'],
+                    'preferred': avail.get('preferred', False),
+                    'created_at': datetime.now().isoformat()
+                }
+                availability_records.append(record)
+            
+            if availability_records:
+                result = self.supabase.table('volunteer_availability')\
+                    .insert(availability_records)\
+                    .execute()
+                return len(result.data) > 0
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error saving volunteer availability: {e}")
+            return False
+
+    async def get_volunteer_availability(self, volunteer_id: str) -> List[Dict[str, Any]]:
+        """Get volunteer availability preferences"""
+        if not self._is_available():
+            return []
+        
+        try:
+            result = self.supabase.table('volunteer_availability')\
+                .select('*')\
+                .eq('volunteer_id', volunteer_id)\
+                .execute()
+            
+            return result.data
+            
+        except Exception as e:
+            logger.error(f"Error getting volunteer availability: {e}")
+            return []
+
+    async def save_shift_assignment(self, assignment_data: Dict[str, Any]) -> Optional[str]:
+        """Save a shift assignment"""
+        if not self._is_available():
+            return None
+        
+        try:
+            assignment_record = {
+                'shift_id': assignment_data['shift_id'],
+                'volunteer_id': assignment_data['volunteer_id'],
+                'assignment_date': assignment_data['assignment_date'],
+                'status': assignment_data.get('status', 'assigned'),
+                'confidence_score': assignment_data.get('confidence_score', 0.0),
+                'created_at': datetime.now().isoformat()
+            }
+            
+            result = self.supabase.table('shift_assignments')\
+                .insert(assignment_record)\
+                .execute()
+            
+            if result.data and len(result.data) > 0:
+                return result.data[0]['id']
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error saving shift assignment: {e}")
+            return None
+
+    async def get_shift_assignments(self, shift_id: str = None, volunteer_id: str = None, 
+                                   assignment_date: str = None) -> List[Dict[str, Any]]:
+        """Get shift assignments with optional filters"""
+        if not self._is_available():
+            return []
+        
+        try:
+            query = self.supabase.table('shift_assignments').select('*')
+            
+            if shift_id:
+                query = query.eq('shift_id', shift_id)
+            if volunteer_id:
+                query = query.eq('volunteer_id', volunteer_id)
+            if assignment_date:
+                query = query.eq('assignment_date', assignment_date)
+            
+            result = query.order('assignment_date').execute()
+            return result.data
+            
+        except Exception as e:
+            logger.error(f"Error getting shift assignments: {e}")
+            return []
+
+    async def save_shift_conflict(self, conflict_data: Dict[str, Any]) -> Optional[str]:
+        """Save a shift conflict"""
+        if not self._is_available():
+            return None
+        
+        try:
+            conflict_record = {
+                'shift_id': conflict_data['shift_id'],
+                'volunteer_id': conflict_data.get('volunteer_id'),
+                'conflict_type': conflict_data['conflict_type'],
+                'description': conflict_data['description'],
+                'severity': conflict_data.get('severity', 'medium'),
+                'resolution_suggestions': json.dumps(conflict_data.get('resolution_suggestions', [])),
+                'resolved': False,
+                'created_at': datetime.now().isoformat()
+            }
+            
+            result = self.supabase.table('shift_conflicts')\
+                .insert(conflict_record)\
+                .execute()
+            
+            if result.data and len(result.data) > 0:
+                return result.data[0]['id']
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error saving shift conflict: {e}")
+            return None
+
+    async def get_shift_conflicts(self, shift_id: str = None, resolved: bool = None) -> List[Dict[str, Any]]:
+        """Get shift conflicts with optional filters"""
+        if not self._is_available():
+            return []
+        
+        try:
+            query = self.supabase.table('shift_conflicts').select('*')
+            
+            if shift_id:
+                query = query.eq('shift_id', shift_id)
+            if resolved is not None:
+                query = query.eq('resolved', resolved)
+            
+            result = query.order('created_at', desc=True).execute()
+            
+            conflicts = []
+            for conflict in result.data:
+                if conflict.get('resolution_suggestions'):
+                    conflict['resolution_suggestions'] = json.loads(conflict['resolution_suggestions'])
+                conflicts.append(conflict)
+            
+            return conflicts
+            
+        except Exception as e:
+            logger.error(f"Error getting shift conflicts: {e}")
+            return []
+
+    async def resolve_shift_conflict(self, conflict_id: str, resolution_notes: str) -> bool:
+        """Mark a shift conflict as resolved"""
+        if not self._is_available():
+            return False
+        
+        try:
+            result = self.supabase.table('shift_conflicts')\
+                .update({
+                    'resolved': True,
+                    'resolution_notes': resolution_notes,
+                    'resolved_at': datetime.now().isoformat()
+                })\
+                .eq('id', conflict_id)\
+                .execute()
+            
+            return len(result.data) > 0
+            
+        except Exception as e:
+            logger.error(f"Error resolving shift conflict: {e}")
+            return False
+
     # Data Export
     async def export_volunteer_data(self) -> Dict[str, pd.DataFrame]:
         """Export all volunteer data for analysis"""
