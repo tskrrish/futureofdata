@@ -19,6 +19,34 @@
     button{background:#4f46e5;color:#fff;border:0;border-radius:10px;padding:12px 16px;font-weight:600;cursor:pointer}
     .pill{display:inline-block;background:#eef2ff;color:#3730a3;border-radius:999px;padding:6px 10px;margin:4px 6px 0 0;font-size:12px}
     a{color:#4f46e5;text-decoration:none}
+    
+    /* Match explanation styles */
+    .match-card{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:16px;margin:10px 0;box-shadow:0 2px 4px rgba(0,0,0,0.1)}
+    .match-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px}
+    .match-title{font-weight:700;font-size:16px;color:#1f2937}
+    .match-score{background:#10b981;color:#fff;border-radius:999px;padding:4px 8px;font-size:12px;font-weight:600}
+    .match-score.good{background:#f59e0b}
+    .match-score.fair{background:#6b7280}
+    .match-details{color:#6b7280;font-size:14px;margin-bottom:12px}
+    
+    /* Match factors visualization */
+    .match-factors{margin:12px 0}
+    .factor{display:flex;align-items:center;margin:6px 0}
+    .factor-label{width:120px;font-size:13px;color:#4b5563;font-weight:500}
+    .factor-bar{flex:1;background:#f3f4f6;border-radius:10px;height:20px;margin:0 8px;position:relative}
+    .factor-fill{background:#10b981;height:100%;border-radius:10px;transition:width 0.3s ease}
+    .factor-fill.skills{background:#8b5cf6}
+    .factor-fill.location{background:#06b6d4}
+    .factor-fill.history{background:#f59e0b}
+    .factor-fill.schedule{background:#ec4899}
+    .factor-fill.experience{background:#10b981}
+    .factor-value{font-size:12px;font-weight:600;color:#374151;min-width:30px}
+    
+    /* Reasons list */
+    .reasons{margin:12px 0}
+    .reason{background:#f8fafc;border-left:4px solid #4f46e5;padding:8px 12px;margin:4px 0;font-size:13px;color:#1f2937}
+    .expandable{cursor:pointer;color:#4f46e5;font-size:12px;margin-top:8px}
+    .detailed-breakdown{display:none;margin-top:12px;padding:12px;background:#f9fafb;border-radius:8px;font-size:12px}
   </style>
 </head>
 <body>
@@ -58,6 +86,107 @@
       chat.scrollTop = chat.scrollHeight;
     }
 
+    function addExplainableMatch(match, rank) {
+      const div = document.createElement('div');
+      div.className = 'bubble bot';
+      
+      const compatibilityScore = match.compatibility_score || match.score || 0;
+      const scoreClass = compatibilityScore >= 0.8 ? 'excellent' : compatibilityScore >= 0.6 ? 'good' : 'fair';
+      const scoreLabel = compatibilityScore >= 0.8 ? 'Excellent Match' : compatibilityScore >= 0.6 ? 'Good Match' : 'Fair Match';
+      
+      const matchFactors = match.match_factors || {};
+      const reasons = match.reasons || [];
+      
+      div.innerHTML = `
+        <div class="match-card">
+          <div class="match-header">
+            <div>
+              <div class="match-title">#${rank} ${match.project_name}</div>
+              <div class="match-details">${match.branch} • ${match.category}</div>
+            </div>
+            <div class="match-score ${scoreClass}">${scoreLabel}</div>
+          </div>
+          
+          <div class="match-factors">
+            ${createFactorBar('Skills Match', matchFactors.skills_alignment || 0, 'skills')}
+            ${createFactorBar('Location', matchFactors.location_convenience || 0, 'location')}
+            ${createFactorBar('Experience', matchFactors.experience_relevance || 0, 'history')}
+            ${createFactorBar('Schedule', matchFactors.schedule_compatibility || 0, 'schedule')}
+            ${createFactorBar('Level Fit', matchFactors.level_appropriateness || 0, 'experience')}
+          </div>
+          
+          <div class="reasons">
+            <div style="font-weight:600;font-size:14px;color:#374151;margin-bottom:6px">Why this matches:</div>
+            ${reasons.slice(0,3).map(reason => `<div class="reason">${reason}</div>`).join('')}
+          </div>
+          
+          <div class="expandable" onclick="toggleDetails(this)">
+            <span>Show detailed breakdown ▼</span>
+          </div>
+          
+          <div class="detailed-breakdown">
+            ${createDetailedBreakdown(match.detailed_breakdown || {})}
+            <div style="margin-top:8px;font-size:13px;color:#6b7280">
+              <strong>Time Commitment:</strong> ${match.time_commitment || 'Variable'}<br/>
+              <strong>Requirements:</strong> ${match.requirements || 'Basic volunteer requirements'}<br/>
+              <strong>Current Volunteers:</strong> ${match.volunteer_count || 0} people
+            </div>
+          </div>
+        </div>
+      `;
+      
+      chat.appendChild(div);
+      chat.scrollTop = chat.scrollHeight;
+    }
+
+    function createFactorBar(label, value, type) {
+      const percentage = Math.min(100, Math.max(0, value));
+      return `
+        <div class="factor">
+          <div class="factor-label">${label}</div>
+          <div class="factor-bar">
+            <div class="factor-fill ${type}" style="width:${percentage}%"></div>
+          </div>
+          <div class="factor-value">${percentage}%</div>
+        </div>
+      `;
+    }
+
+    function createDetailedBreakdown(breakdown) {
+      let html = '<div style="font-weight:600;margin-bottom:8px">Detailed Analysis:</div>';
+      
+      if (breakdown.skills) {
+        html += `<div><strong>Skills:</strong> ${breakdown.skills.matched_skill_categories?.join(', ') || 'General match'}</div>`;
+      }
+      if (breakdown.proximity) {
+        html += `<div><strong>Location:</strong> ${breakdown.proximity.distance_category || 'accessible'} to your area</div>`;
+      }
+      if (breakdown.history && breakdown.history.has_volunteer_history) {
+        html += `<div><strong>Your History:</strong> Good alignment with your volunteer background</div>`;
+      }
+      if (breakdown.schedule) {
+        html += `<div><strong>Schedule:</strong> ${breakdown.schedule.project_hours_per_session || 2} hours per session average</div>`;
+      }
+      if (breakdown.experience) {
+        html += `<div><strong>Experience:</strong> ${breakdown.experience.experience_match_category || 'good'} fit for your level</div>`;
+      }
+      
+      return html;
+    }
+
+    function toggleDetails(element) {
+      const breakdown = element.nextElementSibling;
+      const span = element.querySelector('span');
+      
+      if (breakdown.style.display === 'none' || !breakdown.style.display) {
+        breakdown.style.display = 'block';
+        span.textContent = 'Hide detailed breakdown ▲';
+      } else {
+        breakdown.style.display = 'none';
+        span.textContent = 'Show detailed breakdown ▼';
+      }
+    }
+
     async function ensureConversation(){
       if(conversationId) return conversationId;
       try{
@@ -89,8 +218,7 @@
             `);
             if(Array.isArray(pj.recommendations)){
               pj.recommendations.slice(0,3).forEach((r,i)=>{
-                const line = `<div class=\"pill\" style=\"background:#eef2ff;color:#3730a3\">${i+1}. ${r.project_name || 'Opportunity'}${r.branch? ' · '+r.branch:''}${r.score? ' · ${(r.score*100).toFixed(0)}% match':''}</div>`;
-                addBubble('assistant', line);
+                addExplainableMatch(r, i+1);
               });
             }
             // seed profile into AI context via a hidden system message by asking a short follow-up

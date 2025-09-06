@@ -210,13 +210,20 @@ class VolunteerMatchingEngine:
             # Calculate match score
             score = self._calculate_match_score(user_vector, project, user_preferences)
             
+            # Get comprehensive match explanation
+            match_explanation = self._explain_match(user_preferences, project)
+            
             match_scores.append({
                 'project_id': project['project_id'],
                 'project_name': project['project_name'],
                 'branch': project['branch'],
                 'category': project['category'],
                 'score': score,
-                'reasons': self._explain_match(user_preferences, project),
+                'match_explanation': match_explanation,
+                'reasons': match_explanation['primary_reasons'][:3],  # Keep backward compatibility
+                'match_factors': match_explanation['match_factors'],
+                'compatibility_score': match_explanation['compatibility_score'],
+                'detailed_breakdown': match_explanation['detailed_breakdown'],
                 'requirements': project.get('required_credentials', 'Basic volunteer requirements'),
                 'time_commitment': self._describe_time_commitment(project),
                 'volunteer_count': project.get('unique_volunteers', 0),
@@ -304,45 +311,383 @@ class VolunteerMatchingEngine:
         
         return min(score, 1.0)  # Cap at 1.0
     
-    def _explain_match(self, preferences: Dict[str, Any], project: pd.Series) -> List[str]:
-        """Generate explanations for why this is a good match"""
-        reasons = []
+    def _explain_match(self, preferences: Dict[str, Any], project: pd.Series) -> Dict[str, Any]:
+        """Generate comprehensive explanations for why this is a good match"""
+        explanation = {
+            'primary_reasons': [],
+            'match_factors': {},
+            'compatibility_score': 0.0,
+            'detailed_breakdown': {}
+        }
         
-        # Interest alignment
+        # Calculate individual factor scores and explanations
+        skills_match = self._analyze_skills_match(preferences, project)
+        proximity_match = self._analyze_proximity_match(preferences, project)
+        history_match = self._analyze_history_match(preferences, project)
+        schedule_match = self._analyze_schedule_match(preferences, project)
+        experience_match = self._analyze_experience_match(preferences, project)
+        
+        # Store detailed breakdown
+        explanation['detailed_breakdown'] = {
+            'skills': skills_match,
+            'proximity': proximity_match,
+            'history': history_match,
+            'schedule': schedule_match,
+            'experience': experience_match
+        }
+        
+        # Calculate overall compatibility score
+        explanation['compatibility_score'] = (
+            skills_match['score'] * 0.35 +
+            proximity_match['score'] * 0.20 +
+            history_match['score'] * 0.20 +
+            schedule_match['score'] * 0.15 +
+            experience_match['score'] * 0.10
+        )
+        
+        # Generate primary reasons based on strongest matches
+        factors = [
+            (skills_match, 'Skills'),
+            (proximity_match, 'Location'),
+            (history_match, 'Experience'),
+            (schedule_match, 'Schedule'),
+            (experience_match, 'Level')
+        ]
+        
+        # Sort by score and take top reasons
+        factors.sort(key=lambda x: x[0]['score'], reverse=True)
+        
+        for factor, category in factors[:3]:
+            if factor['score'] > 0.6:  # Only include strong matches
+                explanation['primary_reasons'].extend(factor['reasons'])
+        
+        # Generate match factor summary
+        explanation['match_factors'] = {
+            'skills_alignment': min(100, int(skills_match['score'] * 100)),
+            'location_convenience': min(100, int(proximity_match['score'] * 100)),
+            'experience_relevance': min(100, int(history_match['score'] * 100)),
+            'schedule_compatibility': min(100, int(schedule_match['score'] * 100)),
+            'level_appropriateness': min(100, int(experience_match['score'] * 100))
+        }
+        
+        # Ensure we always have at least some reasons
+        if not explanation['primary_reasons']:
+            explanation['primary_reasons'] = [
+                "New volunteer opportunity with good learning potential",
+                "Supportive environment for getting started"
+            ]
+        
+        return explanation
+    
+    def _analyze_skills_match(self, preferences: Dict[str, Any], project: pd.Series) -> Dict[str, Any]:
+        """Analyze how well user skills and interests match the project"""
+        match_info = {'score': 0.0, 'reasons': [], 'details': {}}
+        
+        # Extract user interests and skills
         interests = str(preferences.get('interests', '')).lower()
+        skills = str(preferences.get('skills', '')).lower()
+        combined_skills = f"{interests} {skills}".strip()
+        
+        # Project information
         category = project['category'].lower()
+        project_name = str(project['project_name']).lower()
+        sample_activities = str(project.get('sample_activities', '')).lower()
+        project_text = f"{category} {project_name} {sample_activities}"
         
-        if 'youth' in interests and 'youth' in category:
-            reasons.append("Matches your interest in working with young people")
-        if 'fitness' in interests and 'fitness' in category:
-            reasons.append("Aligns with your fitness and wellness interests")
-        if 'event' in interests and 'event' in category:
-            reasons.append("Perfect for your interest in special events")
+        # Skills matching keywords
+        skill_keywords = {
+            'youth_development': ['youth', 'child', 'teen', 'mentoring', 'tutoring', 'coaching', 'leadership'],
+            'fitness_wellness': ['fitness', 'exercise', 'wellness', 'health', 'sport', 'swim', 'gym'],
+            'events_admin': ['event', 'planning', 'coordination', 'administrative', 'office', 'organize'],
+            'community_service': ['community', 'outreach', 'volunteer', 'service', 'help', 'support'],
+            'creative_arts': ['art', 'creative', 'music', 'theater', 'craft', 'design'],
+            'technical_skills': ['computer', 'technology', 'data', 'digital', 'tech', 'website']
+        }
         
-        # Experience level
+        matched_skills = []
+        total_matches = 0
+        
+        for skill_category, keywords in skill_keywords.items():
+            user_has_skill = any(keyword in combined_skills for keyword in keywords)
+            project_needs_skill = any(keyword in project_text for keyword in keywords)
+            
+            if user_has_skill and project_needs_skill:
+                matched_skills.append(skill_category)
+                total_matches += 1
+                
+                # Generate specific reasons
+                if 'youth' in skill_category and user_has_skill:
+                    match_info['reasons'].append("Your youth development interests perfectly align with this project")
+                elif 'fitness' in skill_category and user_has_skill:
+                    match_info['reasons'].append("Your fitness and wellness background is highly valuable here")
+                elif 'event' in skill_category and user_has_skill:
+                    match_info['reasons'].append("Your event planning skills are exactly what this project needs")
+                elif 'community' in skill_category and user_has_skill:
+                    match_info['reasons'].append("Your community service passion matches this opportunity")
+        
+        # Calculate score based on matches
+        if total_matches >= 2:
+            match_info['score'] = 0.9
+        elif total_matches == 1:
+            match_info['score'] = 0.7
+        elif interests and any(word in project_text for word in interests.split()):
+            match_info['score'] = 0.5
+            match_info['reasons'].append("Good potential for skill development in this area")
+        else:
+            match_info['score'] = 0.3
+        
+        match_info['details'] = {
+            'matched_skill_categories': matched_skills,
+            'total_skill_matches': total_matches,
+            'user_interests': interests,
+            'project_category': category
+        }
+        
+        return match_info
+    
+    def _analyze_proximity_match(self, preferences: Dict[str, Any], project: pd.Series) -> Dict[str, Any]:
+        """Analyze location convenience and proximity factors"""
+        match_info = {'score': 0.0, 'reasons': [], 'details': {}}
+        
+        project_branch = project['branch']
+        user_location = preferences.get('location_preference', '').lower()
+        
+        # Branch proximity mapping (simplified - in real system could use actual distances)
+        branch_proximity = {
+            'blue ash': ['blue ash', 'mason', 'sharonville', 'montgomery'],
+            'm.e. lyons': ['oakley', 'hyde park', 'madeira', 'mariemont'],
+            'campbell county': ['newport', 'bellevue', 'dayton', 'fort thomas'],
+            'clippard': ['western hills', 'price hill', 'cheviot', 'delhi']
+        }
+        
+        # Direct branch match
+        if user_location and user_location in project_branch.lower():
+            match_info['score'] = 1.0
+            match_info['reasons'].append(f"Located at your preferred {project_branch} branch")
+        
+        # Proximity match
+        elif user_location:
+            for branch, nearby_areas in branch_proximity.items():
+                if branch in project_branch.lower() and any(area in user_location for area in nearby_areas):
+                    match_info['score'] = 0.8
+                    match_info['reasons'].append(f"Conveniently located near your area at {project_branch}")
+                    break
+            else:
+                match_info['score'] = 0.4
+                match_info['reasons'].append(f"Accessible location at {project_branch}")
+        
+        # No location preference specified
+        else:
+            match_info['score'] = 0.6  # Neutral score
+        
+        # Consider branch popularity/accessibility
         volunteer_count = project.get('unique_volunteers', 0)
-        if volunteer_count > 15:
-            reasons.append("Well-established program with strong volunteer support")
-        elif volunteer_count > 5:
-            reasons.append("Growing program where you can make a real impact")
+        if volunteer_count > 20:
+            match_info['reasons'].append("Popular branch with excellent facilities and parking")
         
-        # Time commitment
-        avg_hours = project.get('avg_hours_per_session', 0)
-        if avg_hours <= 2:
-            reasons.append("Flexible time commitment that fits busy schedules")
-        elif avg_hours <= 4:
-            reasons.append("Moderate time commitment with meaningful impact")
+        match_info['details'] = {
+            'project_branch': project_branch,
+            'user_location_preference': user_location,
+            'distance_category': 'exact' if match_info['score'] >= 1.0 else 'nearby' if match_info['score'] >= 0.7 else 'accessible'
+        }
         
-        # Location convenience
-        if preferences.get('location'):
-            reasons.append(f"Conveniently located at {project['branch']}")
+        return match_info
+    
+    def _analyze_history_match(self, preferences: Dict[str, Any], project: pd.Series) -> Dict[str, Any]:
+        """Analyze how project aligns with user's volunteer history and patterns"""
+        match_info = {'score': 0.0, 'reasons': [], 'details': {}}
         
-        # Default reasons if no specific matches
-        if not reasons:
-            reasons.append("Great opportunity to get started with volunteering")
-            reasons.append("Supportive environment for new volunteers")
+        # Extract historical preferences from affinity data
+        branch_affinity = preferences.get('affinity', {}).get('branches', {})
+        category_affinity = preferences.get('affinity', {}).get('categories', {})
+        volunteer_type = preferences.get('volunteer_type', '')
         
-        return reasons[:3]  # Return top 3 reasons
+        project_branch = project['branch']
+        project_category = project['category']
+        
+        # Branch history match
+        branch_score = 0
+        if branch_affinity:
+            if project_branch in branch_affinity:
+                branch_score = min(1.0, branch_affinity[project_branch] / 5)  # Normalize
+                match_info['reasons'].append(f"You've successfully volunteered at {project_branch} before")
+        
+        # Category history match
+        category_score = 0
+        if category_affinity:
+            if project_category in category_affinity:
+                category_score = min(1.0, category_affinity[project_category] / 3)  # Normalize
+                match_info['reasons'].append(f"Great fit based on your {project_category} volunteer history")
+        
+        # Volunteer type alignment
+        type_score = 0
+        if volunteer_type:
+            project_hours = project.get('avg_hours_per_session', 0)
+            project_volunteers = project.get('unique_volunteers', 0)
+            
+            if volunteer_type == 'Champion' and project_hours > 3:
+                type_score = 0.9
+                match_info['reasons'].append("Perfect for experienced volunteers like yourself")
+            elif volunteer_type == 'Regular' and 1 <= project_hours <= 4:
+                type_score = 0.8
+                match_info['reasons'].append("Ideal time commitment for regular volunteers")
+            elif volunteer_type == 'Explorer' and project_volunteers > 10:
+                type_score = 0.7
+                match_info['reasons'].append("Well-established program great for exploring new opportunities")
+            elif volunteer_type == 'Newcomer' and project_volunteers > 5:
+                type_score = 0.6
+                match_info['reasons'].append("Supportive environment perfect for new volunteers")
+        
+        # Calculate overall history score
+        match_info['score'] = (branch_score * 0.4 + category_score * 0.4 + type_score * 0.2)
+        
+        # If no history, provide encouragement
+        if match_info['score'] < 0.3 and not branch_affinity and not category_affinity:
+            match_info['score'] = 0.5
+            match_info['reasons'].append("Great opportunity to start building your volunteer experience")
+        
+        match_info['details'] = {
+            'branch_history_score': branch_score,
+            'category_history_score': category_score,
+            'volunteer_type_match_score': type_score,
+            'has_volunteer_history': bool(branch_affinity or category_affinity)
+        }
+        
+        return match_info
+    
+    def _analyze_schedule_match(self, preferences: Dict[str, Any], project: pd.Series) -> Dict[str, Any]:
+        """Analyze schedule and time commitment compatibility"""
+        match_info = {'score': 0.0, 'reasons': [], 'details': {}}
+        
+        # User availability preferences
+        availability = preferences.get('availability', {})
+        user_time_commitment = preferences.get('time_commitment', 2)  # 1=low, 2=medium, 3=high
+        
+        # Project time characteristics
+        project_hours = project.get('avg_hours_per_session', 2)
+        project_sessions = project.get('total_sessions', 0)
+        
+        # Time commitment matching
+        time_score = 0
+        if user_time_commitment == 1:  # Low commitment preference
+            if project_hours <= 2:
+                time_score = 0.9
+                match_info['reasons'].append("Perfect for your flexible schedule with short time commitments")
+            elif project_hours <= 4:
+                time_score = 0.6
+                match_info['reasons'].append("Manageable time commitment that fits most schedules")
+        elif user_time_commitment == 2:  # Medium commitment
+            if 1 <= project_hours <= 4:
+                time_score = 0.8
+                match_info['reasons'].append("Ideal time commitment for regular volunteer involvement")
+        elif user_time_commitment == 3:  # High commitment
+            if project_hours >= 3:
+                time_score = 0.9
+                match_info['reasons'].append("Great opportunity for deeper volunteer engagement")
+        
+        # Schedule flexibility based on availability
+        schedule_score = 0
+        if availability:
+            if availability.get('weekday', False) and availability.get('weekend', False):
+                schedule_score = 0.9
+                match_info['reasons'].append("Your flexible availability fits perfectly with volunteer opportunities")
+            elif availability.get('weekday', False) or availability.get('weekend', False):
+                schedule_score = 0.7
+                match_info['reasons'].append("Good scheduling options available for this opportunity")
+            elif availability.get('evening', False):
+                schedule_score = 0.6
+                match_info['reasons'].append("Evening volunteer options may be available")
+        else:
+            schedule_score = 0.5  # Neutral if no availability specified
+        
+        # Project frequency consideration
+        frequency_score = 0
+        if project_sessions > 20:
+            frequency_score = 0.8
+            match_info['reasons'].append("Flexible scheduling with multiple session options")
+        elif project_sessions > 5:
+            frequency_score = 0.6
+        else:
+            frequency_score = 0.4
+        
+        match_info['score'] = (time_score * 0.5 + schedule_score * 0.3 + frequency_score * 0.2)
+        
+        match_info['details'] = {
+            'user_time_commitment_level': user_time_commitment,
+            'project_hours_per_session': project_hours,
+            'time_compatibility_score': time_score,
+            'schedule_flexibility_score': schedule_score,
+            'user_availability': availability
+        }
+        
+        return match_info
+    
+    def _analyze_experience_match(self, preferences: Dict[str, Any], project: pd.Series) -> Dict[str, Any]:
+        """Analyze experience level and project difficulty alignment"""
+        match_info = {'score': 0.0, 'reasons': [], 'details': {}}
+        
+        user_experience = preferences.get('experience_level', 1)  # 1=beginner, 2=some, 3=experienced
+        project_volunteers = project.get('unique_volunteers', 0)
+        project_hours = project.get('avg_hours_per_session', 0)
+        credentials_required = str(project.get('required_credentials', '')).lower()
+        
+        # Experience level matching
+        if user_experience == 1:  # Beginner
+            if project_volunteers > 15:  # Well-established program
+                match_info['score'] = 0.9
+                match_info['reasons'].append("Excellent support system for new volunteers")
+            elif project_volunteers > 5:
+                match_info['score'] = 0.7
+                match_info['reasons'].append("Good beginner-friendly environment with volunteer support")
+            elif 'basic' in credentials_required or 'none' in credentials_required:
+                match_info['score'] = 0.8
+                match_info['reasons'].append("No special credentials required - perfect for getting started")
+            else:
+                match_info['score'] = 0.5
+                match_info['reasons'].append("Opportunity to develop new volunteer skills")
+        
+        elif user_experience == 2:  # Some experience
+            if project_hours <= 4:
+                match_info['score'] = 0.8
+                match_info['reasons'].append("Perfect match for your volunteer experience level")
+            elif project_volunteers > 10:
+                match_info['score'] = 0.7
+                match_info['reasons'].append("Great way to expand your volunteer experience")
+        
+        elif user_experience == 3:  # Experienced
+            if project_hours > 3 or 'leadership' in credentials_required:
+                match_info['score'] = 0.9
+                match_info['reasons'].append("Excellent opportunity to utilize your volunteer expertise")
+            elif project_volunteers < 10:
+                match_info['score'] = 0.8
+                match_info['reasons'].append("Your experience could make a significant impact here")
+            else:
+                match_info['score'] = 0.7
+        
+        # Credential requirements consideration
+        if 'background check' in credentials_required:
+            match_info['details']['requires_background_check'] = True
+            if user_experience >= 2:
+                match_info['reasons'].append("Your experience makes credential requirements manageable")
+        
+        # Age appropriateness
+        user_age = preferences.get('age', 35)
+        if 'youth' in project['category'].lower():
+            if 18 <= user_age <= 65:
+                match_info['score'] = min(match_info['score'] + 0.1, 1.0)
+                match_info['reasons'].append("Great age match for youth development programs")
+        
+        match_info['details'] = {
+            'user_experience_level': user_experience,
+            'project_complexity_indicators': {
+                'volunteer_count': project_volunteers,
+                'hours_per_session': project_hours,
+                'credentials_required': credentials_required
+            },
+            'experience_match_category': 'perfect' if match_info['score'] >= 0.8 else 'good' if match_info['score'] >= 0.6 else 'developing'
+        }
+        
+        return match_info
     
     def _describe_time_commitment(self, project: pd.Series) -> str:
         """Describe the time commitment for a project"""
