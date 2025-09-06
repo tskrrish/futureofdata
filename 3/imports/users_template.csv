@@ -1,0 +1,4 @@
+email,first_name,last_name,phone,age,gender,city,state,zip_code,is_ymca_member,member_branch
+john.doe@email.com,John,Doe,555-1234,35,Male,Cincinnati,OH,45202,TRUE,Blue Ash YMCA
+jane.smith@email.com,Jane,Smith,555-5678,28,Female,Cincinnati,OH,45209,FALSE,
+mike.johnson@email.com,Mike,Johnson,555-9999,42,Male,Newport,KY,41071,TRUE,Campbell County YMCA
