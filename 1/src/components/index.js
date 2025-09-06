@@ -1,6 +1,8 @@
 export { Header } from "./ui/Header";
 export { Controls } from "./ui/Controls";
 export { KPI } from "./ui/KPI";
+export { KPIBuilder } from "./ui/KPIBuilder";
+export { CustomKPI, CustomKPIGrid } from "./ui/CustomKPI";
 
 export { HoursByBranchChart } from "./charts/HoursByBranchChart";
 export { MonthlyTrendChart } from "./charts/MonthlyTrendChart";

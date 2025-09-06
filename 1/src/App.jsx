@@ -1,14 +1,17 @@
 import React, { useState } from "react";
-import { Users, Clock, UserCheck, Sparkles } from "lucide-react";
+import { Users, Clock, UserCheck, Sparkles, Calculator } from "lucide-react";
 
 import { SAMPLE_DATA } from "./data/sampleData";
 import { exportCSV } from "./utils/csvUtils";
 import { useVolunteerData } from "./hooks/useVolunteerData";
 import { useFileUpload } from "./hooks/useFileUpload";
+import { useCustomKPIs } from "./hooks/useCustomKPIs";
 
 import { Header } from "./components/ui/Header";
 import { Controls } from "./components/ui/Controls";
 import { KPI } from "./components/ui/KPI";
+import { KPIBuilder } from "./components/ui/KPIBuilder";
+import { CustomKPIGrid } from "./components/ui/CustomKPI";
 import { OverviewTab } from "./components/tabs/OverviewTab";
 import { BranchesTab } from "./components/tabs/BranchesTab";
 import { PeopleTab } from "./components/tabs/PeopleTab";
@@ -19,6 +22,7 @@ export default function App() {
   const [branchFilter, setBranchFilter] = useState("All");
   const [search, setSearch] = useState("");
   const [tab, setTab] = useState("overview");
+  const [showKPIBuilder, setShowKPIBuilder] = useState(false);
 
   const {
     branches,
@@ -34,6 +38,7 @@ export default function App() {
     badges
   } = useVolunteerData(raw, branchFilter, search);
 
+  const { customKPIs, saveKPI } = useCustomKPIs();
   const handleFile = useFileUpload(setRaw);
 
   const exportHandlers = {
@@ -56,20 +61,63 @@ export default function App() {
       />
 
       {/* KPI Cards */}
-      <div className="max-w-7xl mx-auto px-4 grid sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <KPI icon={<Clock className="w-5 h-5" />} label="Total Hours" value={totalHours.toFixed(1)} />
-        <KPI icon={<Users className="w-5 h-5" />} label="Active Volunteers" value={activeVolunteersCount} />
-        <KPI
-          icon={<UserCheck className="w-5 h-5" />}
-          label="Member Volunteers"
-          value={memberVolunteersCount}
-          sub={`${((memberVolunteersCount / Math.max(activeVolunteersCount, 1)) * 100).toFixed(1)}%`}
-        />
-        <KPI
-          icon={<Sparkles className="w-5 h-5" />}
-          label="Avg Hours / Active"
-          value={(totalHours / Math.max(activeVolunteersCount, 1)).toFixed(1)}
-        />
+      <div className="max-w-7xl mx-auto px-4">
+        {/* Default KPIs */}
+        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+          <KPI icon={<Clock className="w-5 h-5" />} label="Total Hours" value={totalHours.toFixed(1)} />
+          <KPI icon={<Users className="w-5 h-5" />} label="Active Volunteers" value={activeVolunteersCount} />
+          <KPI
+            icon={<UserCheck className="w-5 h-5" />}
+            label="Member Volunteers"
+            value={memberVolunteersCount}
+            sub={`${((memberVolunteersCount / Math.max(activeVolunteersCount, 1)) * 100).toFixed(1)}%`}
+          />
+          <KPI
+            icon={<Sparkles className="w-5 h-5" />}
+            label="Avg Hours / Active"
+            value={(totalHours / Math.max(activeVolunteersCount, 1)).toFixed(1)}
+          />
+        </div>
+
+        {/* Custom KPI Builder Button & Custom KPIs */}
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-lg font-semibold text-gray-800">Custom KPIs</h3>
+          <button
+            onClick={() => setShowKPIBuilder(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+          >
+            <Calculator className="w-4 h-4" />
+            Create Custom KPI
+          </button>
+        </div>
+        
+        {customKPIs.length > 0 ? (
+          <CustomKPIGrid 
+            kpis={customKPIs} 
+            volunteerData={{
+              totalHours,
+              activeVolunteersCount,
+              memberVolunteersCount,
+              filtered
+            }}
+            className="mb-6"
+          />
+        ) : (
+          <div className="bg-gray-50 border-2 border-dashed border-gray-200 rounded-lg p-8 text-center mb-6">
+            <Calculator className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+            <h3 className="text-lg font-medium text-gray-600 mb-2">No Custom KPIs Yet</h3>
+            <p className="text-gray-500 mb-4">
+              Create custom KPIs with formulas and filters to track metrics that matter to your organization.
+            </p>
+            <button
+              onClick={() => setShowKPIBuilder(true)}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+            >
+              <Calculator className="w-4 h-4" />
+              Create Your First Custom KPI
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Tabs */}
@@ -118,6 +166,20 @@ export default function App() {
       <footer className="max-w-7xl mx-auto px-4 py-10 text-xs text-neutral-500">
         Built for YMCA Cincinnati — Hackathon: Platform for Belonging. Upload VolunteerMatters CSV/JSON above to power the dashboard.
       </footer>
+
+      {/* KPI Builder Modal */}
+      <KPIBuilder
+        isOpen={showKPIBuilder}
+        onClose={() => setShowKPIBuilder(false)}
+        volunteerData={{
+          totalHours,
+          activeVolunteersCount,
+          memberVolunteersCount,
+          filtered
+        }}
+        onSaveKPI={saveKPI}
+        customKPIs={customKPIs}
+      />
     </div>
   );
 }
