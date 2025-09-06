@@ -502,6 +502,159 @@ Your volunteer coordinator will help guide you through everything. Welcome to th
         }
         
         return fallback_guidance.get(step, "Please contact your local YMCA branch for assistance with volunteering!")
+    
+    # Message Template Methods
+    async def suggest_template(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        """Suggest an appropriate template based on context"""
+        
+        situation = context.get('situation', '')
+        volunteer_info = context.get('volunteer_info', {})
+        
+        prompt = f"""
+        Based on the following situation and volunteer information, suggest the most appropriate message template category and provide guidance:
+        
+        Situation: {situation}
+        Volunteer Info: {volunteer_info}
+        
+        Available template categories:
+        - welcome: For new volunteers
+        - follow_up: After volunteer sessions or activities
+        - reminder: For upcoming events or commitments
+        - thank_you: Appreciation and milestone recognition
+        - general: Other communications
+        
+        Please recommend the best category and explain why it's appropriate.
+        """
+        
+        try:
+            messages = [
+                {"role": "system", "content": self.system_prompt + "\n\nYou are helping with volunteer communication and message templates."},
+                {"role": "user", "content": prompt}
+            ]
+            
+            response = await self._call_inference_api(messages)
+            
+            if response:
+                return {
+                    "suggestion": response["content"],
+                    "success": True
+                }
+            else:
+                return {
+                    "suggestion": "Consider using a 'general' template for this situation.",
+                    "success": False
+                }
+                
+        except Exception as e:
+            return {
+                "suggestion": "Consider using a 'general' template for this situation.",
+                "success": False,
+                "error": str(e)
+            }
+    
+    async def help_create_template(self, template_request: Dict[str, Any]) -> Dict[str, Any]:
+        """Help create a message template with AI assistance"""
+        
+        purpose = template_request.get('purpose', '')
+        category = template_request.get('category', '')
+        audience = template_request.get('audience', '')
+        tone = template_request.get('tone', 'friendly and professional')
+        
+        prompt = f"""
+        Help create a message template for YMCA volunteer communications with these specifications:
+        
+        Purpose: {purpose}
+        Category: {category}
+        Target Audience: {audience}
+        Tone: {tone}
+        
+        Please create:
+        1. A compelling subject line (use merge fields like {{{{user.first_name}}}} where appropriate)
+        2. A well-structured message content with proper merge fields
+        3. A list of recommended merge fields for this template
+        
+        The message should be:
+        - Warm and welcoming (YMCA tone)
+        - Clear and actionable
+        - Appropriately using merge fields for personalization
+        - Professional but not overly formal
+        
+        Format your response with clear sections for Subject, Content, and Merge Fields.
+        """
+        
+        try:
+            messages = [
+                {"role": "system", "content": self.system_prompt + "\n\nYou are a skilled copywriter helping create volunteer communication templates."},
+                {"role": "user", "content": prompt}
+            ]
+            
+            response = await self._call_inference_api(messages)
+            
+            if response:
+                return {
+                    "template_draft": response["content"],
+                    "success": True
+                }
+            else:
+                return {
+                    "template_draft": "I'm having trouble generating a template right now. Please try creating it manually or contact support.",
+                    "success": False
+                }
+                
+        except Exception as e:
+            return {
+                "template_draft": "Error generating template. Please try again later.",
+                "success": False,
+                "error": str(e)
+            }
+    
+    async def optimize_template_content(self, existing_content: str, feedback: str = "") -> Dict[str, Any]:
+        """Optimize existing template content based on feedback"""
+        
+        prompt = f"""
+        Please help optimize this message template content for YMCA volunteer communications:
+        
+        Current Content:
+        {existing_content}
+        
+        Feedback/Requirements:
+        {feedback if feedback else "Make it more engaging and effective"}
+        
+        Please provide an improved version that:
+        - Maintains the YMCA's warm, community-focused tone
+        - Is more engaging and actionable
+        - Uses appropriate merge fields for personalization
+        - Follows email best practices for volunteer communications
+        
+        Keep the same general structure but improve clarity, engagement, and effectiveness.
+        """
+        
+        try:
+            messages = [
+                {"role": "system", "content": self.system_prompt + "\n\nYou are optimizing volunteer communication templates for better engagement."},
+                {"role": "user", "content": prompt}
+            ]
+            
+            response = await self._call_inference_api(messages)
+            
+            if response:
+                return {
+                    "optimized_content": response["content"],
+                    "success": True
+                }
+            else:
+                return {
+                    "optimized_content": existing_content,
+                    "success": False,
+                    "message": "Unable to optimize template at this time."
+                }
+                
+        except Exception as e:
+            return {
+                "optimized_content": existing_content,
+                "success": False,
+                "error": str(e)
+            }
 
 # Example usage
 async def test_assistant():
