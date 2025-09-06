@@ -3,7 +3,15 @@ import confetti from 'canvas-confetti';
 import { playCheer, playDrumroll, playFanfare, playAmbientTone, playCardFlip, playMagicalSparkle } from './utils/audio.js';
 import Badge from './components/Badge.jsx';
 import CelebrationOverlay from './components/CelebrationOverlay.jsx';
-import { getTierForHours, MILESTONES } from './constants.js';
+import MilestoneOverlay from './components/MilestoneOverlay.jsx';
+import AnniversaryOverlay from './components/AnniversaryOverlay.jsx';
+import { 
+  getTierForHours, 
+  MILESTONES, 
+  getMajorMilestones, 
+  isAnniversaryToday, 
+  calculateAnniversaryYears 
+} from './constants.js';
 
 function App() {
   const [searchTerm, setSearchTerm] = useState('');
@@ -12,6 +20,9 @@ function App() {
   const firedRef = useRef(false);
   const [showOverlay, setShowOverlay] = useState(false);
   const [hideSearchBar, setHideSearchBar] = useState(false);
+  const [showMilestoneOverlay, setShowMilestoneOverlay] = useState(false);
+  const [currentMilestone, setCurrentMilestone] = useState(null);
+  const [showAnniversaryOverlay, setShowAnniversaryOverlay] = useState(false);
 
   function runFullScreenConfetti(hours) {
     const duration = Math.min(9000, 4000 + hours * 40);
@@ -74,9 +85,19 @@ function App() {
       // Get tier for musical theming
       const tier = getTierForHours(hours);
       
-      // Hide search bar for 10 seconds
+      // Check for major milestone achievements (50, 100, 500 hours)
+      const majorMilestones = getMajorMilestones();
+      const achievedMajorMilestones = majorMilestones.filter(m => hours >= m.threshold);
+      const achievedMajorMilestone = achievedMajorMilestones[achievedMajorMilestones.length - 1]; // Get the highest achieved
+      
+      // Check for anniversary celebration
+      const isAnniversary = isAnniversaryToday(volunteerData.first_activity);
+      const anniversaryYears = calculateAnniversaryYears(volunteerData.first_activity);
+      
+      // Hide search bar for extended time if major celebration
+      const celebrationDuration = (achievedMajorMilestone || isAnniversary) ? 15000 : 10000;
       setHideSearchBar(true);
-      setTimeout(() => setHideSearchBar(false), 10000);
+      setTimeout(() => setHideSearchBar(false), celebrationDuration);
       
       // Musical sequence
       playDrumroll(600);
@@ -89,13 +110,40 @@ function App() {
       }
       setTimeout(() => playCheer(700), 2500);
       
-      // Visual effects
+      // Visual effects sequence
       runFullScreenConfetti(hours);
+      
+      // Show standard overlay first
       if (hours >= 25) setShowOverlay(true);
       setTimeout(() => setShowOverlay(false), Math.min(5000, 2200 + hours * 20));
+      
+      // Show major milestone overlay for 50/100/500 hours
+      if (achievedMajorMilestone) {
+        setTimeout(() => {
+          setCurrentMilestone(achievedMajorMilestone);
+          setShowMilestoneOverlay(true);
+        }, 3000);
+      }
+      
+      // Show anniversary overlay if it's their anniversary
+      if (isAnniversary && anniversaryYears >= 1) {
+        const anniversaryDelay = achievedMajorMilestone ? 8000 : 3000;
+        setTimeout(() => {
+          setShowAnniversaryOverlay(true);
+        }, anniversaryDelay);
+      }
     }
     if (!volunteerData) firedRef.current = false;
   }, [volunteerData]);
+
+  const handleMilestoneComplete = () => {
+    setShowMilestoneOverlay(false);
+    setCurrentMilestone(null);
+  };
+
+  const handleAnniversaryComplete = () => {
+    setShowAnniversaryOverlay(false);
+  };
 
   return (
     <div className="immersive-viewport">
@@ -162,6 +210,20 @@ function App() {
         show={showOverlay} 
         seed={volunteerData ? `${volunteerData.first_name}${volunteerData.last_name}` : ''} 
         tier={volunteerData ? getTierForHours(Number(volunteerData.hours_total)) : 'basic'} 
+      />
+
+      <MilestoneOverlay
+        show={showMilestoneOverlay}
+        milestone={currentMilestone}
+        hours={volunteerData ? Number(volunteerData.hours_total) : 0}
+        onComplete={handleMilestoneComplete}
+      />
+
+      <AnniversaryOverlay
+        show={showAnniversaryOverlay}
+        firstActivityDate={volunteerData?.first_activity}
+        volunteerName={volunteerData ? `${volunteerData.first_name} ${volunteerData.last_name}` : ''}
+        onComplete={handleAnniversaryComplete}
       />
     </div>
   );

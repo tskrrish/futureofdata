@@ -4,9 +4,9 @@
 export const MILESTONES = [
   { threshold: 10, label: "First Impact" },
   { threshold: 25, label: "Service Star" },
-  { threshold: 50, label: "Commitment Champion" },
-  { threshold: 100, label: "Passion In Action Award" },
-  { threshold: 500, label: "Guiding Light Award" },
+  { threshold: 50, label: "Commitment Champion", isMajor: true },
+  { threshold: 100, label: "Passion In Action Award", isMajor: true },
+  { threshold: 500, label: "Guiding Light Award", isMajor: true },
 ]
 
 export const MILESTONE_DETAILS = {
@@ -116,6 +116,42 @@ export function computeMilestones(totalHours) {
   return MILESTONES
     .filter(m => totalHours >= m.threshold)
     .map(m => m.label)
+}
+
+export function detectNewMilestones(previousHours, currentHours) {
+  const previousMilestones = MILESTONES.filter(m => previousHours >= m.threshold)
+  const currentMilestones = MILESTONES.filter(m => currentHours >= m.threshold)
+  
+  return currentMilestones.filter(current => 
+    !previousMilestones.some(prev => prev.threshold === current.threshold)
+  )
+}
+
+export function getMajorMilestones() {
+  return MILESTONES.filter(m => m.isMajor)
+}
+
+export function calculateAnniversaryYears(firstActivityDate) {
+  if (!firstActivityDate) return 0
+  const startDate = new Date(firstActivityDate)
+  const currentDate = new Date()
+  const years = currentDate.getFullYear() - startDate.getFullYear()
+  
+  const hasPassedAnniversary = 
+    currentDate.getMonth() > startDate.getMonth() ||
+    (currentDate.getMonth() === startDate.getMonth() && currentDate.getDate() >= startDate.getDate())
+  
+  return hasPassedAnniversary ? years : years - 1
+}
+
+export function isAnniversaryToday(firstActivityDate) {
+  if (!firstActivityDate) return false
+  const startDate = new Date(firstActivityDate)
+  const today = new Date()
+  
+  return startDate.getMonth() === today.getMonth() && 
+         startDate.getDate() === today.getDate() &&
+         today.getFullYear() > startDate.getFullYear()
 }
 
 export function getStoryworldChipClass(storyworldName) {
