@@ -20,6 +20,8 @@ from ai_assistant import VolunteerAIAssistant
 from matching_engine import VolunteerMatchingEngine
 from data_processor import VolunteerDataProcessor
 from database import VolunteerDatabase
+from funnel_tracker import VolunteerFunnelTracker, FunnelStage, InterventionType, FunnelEvent
+from funnel_analytics import FunnelAnalyticsEngine
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -41,6 +43,8 @@ app.add_middleware(
 # Global instances
 ai_assistant = VolunteerAIAssistant()
 database = VolunteerDatabase()
+funnel_tracker = VolunteerFunnelTracker(database)
+analytics_engine = FunnelAnalyticsEngine(funnel_tracker, database)
 volunteer_data = None
 matching_engine = None
 
@@ -78,6 +82,25 @@ class FeedbackData(BaseModel):
     feedback_text: str = ""
     feedback_type: str = "general"
 
+class FunnelEventData(BaseModel):
+    user_id: str
+    stage: str
+    session_id: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+    intervention_applied: Optional[str] = None
+
+class InterventionRequest(BaseModel):
+    user_id: str
+    intervention_type: str
+    target_stage: str
+    metadata: Optional[Dict[str, Any]] = None
+
+class CohortRequest(BaseModel):
+    user_ids: List[str]
+    cohort_name: str
+    is_control_group: bool = False
+    metadata: Optional[Dict[str, Any]] = None
+
 # Initialize data on startup
 @app.on_event("startup")
 async def startup_event():
@@ -89,7 +112,8 @@ async def startup_event():
     # Initialize database tables
     try:
         await database.initialize_tables()
-        print("✅ Database initialized")
+        await funnel_tracker.initialize_tracking_tables()
+        print("✅ Database initialized with funnel tracking")
     except Exception as e:
         print(f"⚠️  Database initialization note: {e}")
     
@@ -447,6 +471,23 @@ async def get_volunteer_matches(
                 user_id,
                 preferences_dict
             )
+            
+            # Track funnel progression - user received matches
+            if ml_matches:
+                matches_event = FunnelEvent(
+                    user_id=user_id,
+                    stage=FunnelStage.MATCHED_OPPORTUNITIES,
+                    timestamp=datetime.now(),
+                    metadata={
+                        "match_count": len(ml_matches),
+                        "top_score": ml_matches[0]['score'] if ml_matches else 0,
+                        "preferences": preferences_dict
+                    }
+                )
+                background_tasks.add_task(
+                    funnel_tracker.track_stage_progression,
+                    matches_event
+                )
         
         # Track analytics
         background_tasks.add_task(
@@ -481,6 +522,23 @@ async def create_user(user_data: UserProfile) -> JSONResponse:
                 {"source": "api"},
                 user['id']
             )
+            
+            # Track funnel progression - user expressed interest and created profile
+            interest_event = FunnelEvent(
+                user_id=user['id'],
+                stage=FunnelStage.INTEREST_EXPRESSED,
+                timestamp=datetime.now(),
+                metadata={"source": "api", "user_data": user_data.dict(exclude_unset=True)}
+            )
+            await funnel_tracker.track_stage_progression(interest_event)
+            
+            profile_event = FunnelEvent(
+                user_id=user['id'],
+                stage=FunnelStage.PROFILE_CREATED,
+                timestamp=datetime.now(),
+                metadata={"profile_complete": True}
+            )
+            await funnel_tracker.track_stage_progression(profile_event)
             
             return JSONResponse(content={"user": user, "success": True})
         else:
@@ -632,6 +690,189 @@ async def get_analytics(days: int = 30) -> JSONResponse:
     except Exception as e:
         print(f"❌ Analytics error: {e}")
         raise HTTPException(status_code=500, detail="Analytics not available")
+
+# Funnel tracking endpoints
+@app.post("/api/funnel/track-stage")
+async def track_funnel_stage(event_data: FunnelEventData) -> JSONResponse:
+    """Track a user's progression through funnel stages"""
+    try:
+        # Convert string stage to enum
+        stage = FunnelStage(event_data.stage)
+        intervention = InterventionType(event_data.intervention_applied) if event_data.intervention_applied else None
+        
+        event = FunnelEvent(
+            user_id=event_data.user_id,
+            stage=stage,
+            timestamp=datetime.now(),
+            session_id=event_data.session_id,
+            metadata=event_data.metadata,
+            intervention_applied=intervention
+        )
+        
+        success = await funnel_tracker.track_stage_progression(event)
+        
+        return JSONResponse(content={
+            "success": success,
+            "stage": event_data.stage,
+            "user_id": event_data.user_id,
+            "tracked_at": datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        print(f"❌ Funnel tracking error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to track funnel stage")
+
+@app.post("/api/funnel/apply-intervention")
+async def apply_intervention(intervention_data: InterventionRequest) -> JSONResponse:
+    """Apply an intervention to help user progress"""
+    try:
+        intervention_type = InterventionType(intervention_data.intervention_type)
+        target_stage = FunnelStage(intervention_data.target_stage)
+        
+        intervention_id = await funnel_tracker.apply_intervention(
+            intervention_data.user_id,
+            intervention_type,
+            target_stage,
+            intervention_data.metadata
+        )
+        
+        return JSONResponse(content={
+            "success": intervention_id is not None,
+            "intervention_id": intervention_id,
+            "user_id": intervention_data.user_id,
+            "intervention_type": intervention_data.intervention_type,
+            "target_stage": intervention_data.target_stage,
+            "applied_at": datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        print(f"❌ Intervention application error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to apply intervention")
+
+@app.get("/api/funnel/analytics")
+async def get_funnel_analytics(days: int = 30) -> JSONResponse:
+    """Get comprehensive funnel analytics"""
+    try:
+        analytics = await funnel_tracker.get_funnel_analytics(days)
+        return JSONResponse(content=analytics)
+        
+    except Exception as e:
+        print(f"❌ Funnel analytics error: {e}")
+        raise HTTPException(status_code=500, detail="Analytics not available")
+
+@app.get("/api/funnel/at-risk-users")
+async def get_at_risk_users(hours_threshold: int = 48) -> JSONResponse:
+    """Get users at risk of dropping off"""
+    try:
+        at_risk_users = await funnel_tracker.identify_at_risk_users(hours_threshold)
+        
+        return JSONResponse(content={
+            "at_risk_users": at_risk_users,
+            "threshold_hours": hours_threshold,
+            "total_at_risk": len(at_risk_users),
+            "generated_at": datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        print(f"❌ At-risk users error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to identify at-risk users")
+
+@app.post("/api/funnel/create-cohort")
+async def create_cohort(cohort_data: CohortRequest) -> JSONResponse:
+    """Create a user cohort for A/B testing"""
+    try:
+        success = await funnel_tracker.create_user_cohort(
+            cohort_data.user_ids,
+            cohort_data.cohort_name,
+            cohort_data.is_control_group,
+            cohort_data.metadata
+        )
+        
+        return JSONResponse(content={
+            "success": success,
+            "cohort_name": cohort_data.cohort_name,
+            "user_count": len(cohort_data.user_ids),
+            "is_control_group": cohort_data.is_control_group,
+            "created_at": datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        print(f"❌ Cohort creation error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create cohort")
+
+@app.get("/api/funnel/stages")
+async def get_funnel_stages() -> JSONResponse:
+    """Get available funnel stages and intervention types"""
+    return JSONResponse(content={
+        "stages": [stage.value for stage in FunnelStage],
+        "intervention_types": [intervention.value for intervention in InterventionType],
+        "stage_descriptions": {
+            FunnelStage.INTEREST_EXPRESSED.value: "User expressed initial interest in volunteering",
+            FunnelStage.PROFILE_CREATED.value: "User created their volunteer profile",
+            FunnelStage.MATCHED_OPPORTUNITIES.value: "User received personalized volunteer matches",
+            FunnelStage.APPLICATION_STARTED.value: "User began application process",
+            FunnelStage.APPLICATION_SUBMITTED.value: "User submitted volunteer application",
+            FunnelStage.SCREENING_COMPLETED.value: "Background check and screening completed",
+            FunnelStage.ORIENTATION_SCHEDULED.value: "Volunteer orientation scheduled",
+            FunnelStage.ORIENTATION_COMPLETED.value: "Volunteer completed orientation",
+            FunnelStage.FIRST_ASSIGNMENT.value: "Volunteer received first assignment",
+            FunnelStage.ACTIVE_VOLUNTEER.value: "Volunteer is actively contributing"
+        }
+    })
+
+@app.get("/api/funnel/comprehensive-report")
+async def get_comprehensive_funnel_report(days: int = 30) -> JSONResponse:
+    """Get comprehensive funnel analytics report with insights and recommendations"""
+    try:
+        report = await analytics_engine.generate_comprehensive_report(days)
+        return JSONResponse(content=report)
+        
+    except Exception as e:
+        print(f"❌ Comprehensive report error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to generate comprehensive report")
+
+@app.get("/api/funnel/dropoff-analysis")
+async def get_dropoff_analysis(days: int = 30) -> JSONResponse:
+    """Get detailed analysis of funnel dropoffs"""
+    try:
+        dropoffs = await analytics_engine.analyze_critical_dropoffs(days)
+        return JSONResponse(content={
+            "dropoff_insights": [insight.__dict__ for insight in dropoffs],
+            "period_days": days,
+            "total_critical_issues": len([d for d in dropoffs if d.severity == 'high']),
+            "generated_at": datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        print(f"❌ Dropoff analysis error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to analyze dropoffs")
+
+@app.get("/api/funnel/intervention-effectiveness")
+async def get_intervention_effectiveness(days: int = 30) -> JSONResponse:
+    """Get detailed analysis of intervention effectiveness"""
+    try:
+        analysis = await analytics_engine.analyze_intervention_effectiveness(days)
+        return JSONResponse(content={
+            "intervention_analysis": [result.__dict__ for result in analysis],
+            "period_days": days,
+            "top_performer": analysis[0].__dict__ if analysis else None,
+            "generated_at": datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        print(f"❌ Intervention effectiveness error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to analyze intervention effectiveness")
+
+@app.get("/api/funnel/roi-analysis")
+async def get_roi_analysis(days: int = 30) -> JSONResponse:
+    """Get ROI analysis for interventions"""
+    try:
+        roi = await analytics_engine.calculate_intervention_roi(days)
+        return JSONResponse(content=roi)
+        
+    except Exception as e:
+        print(f"❌ ROI analysis error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to calculate ROI")
 
 # Resources and information
 @app.get("/api/resources")
