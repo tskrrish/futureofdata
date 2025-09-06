@@ -13,6 +13,7 @@ import { OverviewTab } from "./components/tabs/OverviewTab";
 import { BranchesTab } from "./components/tabs/BranchesTab";
 import { PeopleTab } from "./components/tabs/PeopleTab";
 import { PassportTab } from "./components/tabs/PassportTab";
+import { GoogleSheetsSync } from "./components";
 
 export default function App() {
   const [raw, setRaw] = useState(SAMPLE_DATA);
@@ -113,6 +114,11 @@ export default function App() {
         )}
 
         {tab === "passport" && <PassportTab />}
+      </div>
+
+      {/* Google Sheets Sync Section */}
+      <div className="max-w-7xl mx-auto px-4 py-6">
+        <GoogleSheetsSync onDataUpdate={setRaw} />
       </div>
 
       <footer className="max-w-7xl mx-auto px-4 py-10 text-xs text-neutral-500">
