@@ -2,7 +2,7 @@
 Main FastAPI application for Volunteer PathFinder AI Assistant
 Brings together AI, matching engine, and database
 """
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
@@ -13,6 +13,10 @@ import asyncio
 from datetime import datetime
 import os
 import pandas as pd
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 # Import our modules
 from config import settings
@@ -20,7 +24,7 @@ from ai_assistant import VolunteerAIAssistant
 from matching_engine import VolunteerMatchingEngine
 from data_processor import VolunteerDataProcessor
 from database import VolunteerDatabase
-from sms_service import SMSService
+
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -41,10 +45,7 @@ app.add_middleware(
 
 # Global instances
 ai_assistant = VolunteerAIAssistant()
-database = VolunteerDatabase()
-sms_service = SMSService()
-volunteer_data = None
-matching_engine = None
+
 
 # Pydantic models
 class UserProfile(BaseModel):
@@ -80,30 +81,11 @@ class FeedbackData(BaseModel):
     feedback_text: str = ""
     feedback_type: str = "general"
 
-class SMSRequest(BaseModel):
-    phone: str
-    message: str
-    user_id: Optional[str] = None
-    sms_type: str = "reminder"
-
-class SMSReminderRequest(BaseModel):
-    user_id: str
-    phone: str
-    opportunity: Dict[str, Any]
-    send_at: Optional[str] = None  # ISO datetime string
-
-class SMSWebhookData(BaseModel):
-    MessageSid: Optional[str] = None
-    From: Optional[str] = None
-    To: Optional[str] = None
-    Body: Optional[str] = None
-    AccountSid: Optional[str] = None
-
 # Initialize data on startup
 @app.on_event("startup")
 async def startup_event():
     """Initialize application data and models"""
-    global volunteer_data, matching_engine
+
     
     print("🚀 Starting Volunteer PathFinder AI Assistant...")
     
@@ -114,6 +96,7 @@ async def startup_event():
     except Exception as e:
         print(f"⚠️  Database initialization note: {e}")
     
+
     # Load and process volunteer data
     try:
         if os.path.exists(settings.VOLUNTEER_DATA_PATH):
@@ -131,8 +114,21 @@ async def startup_event():
             print(f"⚠️  Volunteer data file not found: {settings.VOLUNTEER_DATA_PATH}")
     except Exception as e:
         print(f"❌ Error loading volunteer data: {e}")
+
+    
+    # Initialize email/SMS drafting components
+    try:
+        print("📝 Initializing email/SMS drafting engine...")
+        drafting_engine = EmailSMSDraftingEngine(ai_assistant)
+        tone_analyzer = ContextualToneAnalyzer()
+        template_engine = MessageTemplateEngine()
+        print("✅ Email/SMS drafting engine initialized")
+    except Exception as e:
+        print(f"❌ Error initializing drafting engine: {e}")
     
     print("🎉 Volunteer PathFinder AI Assistant is ready!")
+    
+
 
 @app.post("/api/reset")
 async def reset_context() -> JSONResponse:
@@ -154,9 +150,110 @@ async def health_check():
         "models_ready": matching_engine is not None and matching_engine.models_trained
     }
 
+# SSO Authentication Routes
+@app.get("/auth/google")
+async def google_login():
+    """Initiate Google OAuth login"""
+    auth_url = sso_auth.get_google_auth_url()
+    return {"auth_url": auth_url}
+
+@app.get("/auth/microsoft")
+async def microsoft_login():
+    """Initiate Microsoft OAuth login"""
+    auth_url = sso_auth.get_microsoft_auth_url()
+    return {"auth_url": auth_url}
+
+@app.get("/auth/callback/google")
+async def google_callback(request: Request):
+    """Handle Google OAuth callback"""
+    try:
+        result = await sso_auth.handle_google_callback(request)
+        # Return HTML page that handles the token storage and redirect
+        return HTMLResponse(f"""
+        <!doctype html>
+        <html>
+        <head><title>Authentication Complete</title></head>
+        <body>
+          <script>
+            localStorage.setItem('auth_token', '{result["access_token"]}');
+            localStorage.setItem('user', '{json.dumps(result["user"])}');
+            localStorage.setItem('auth_provider', '{result["provider"]}');
+            window.location.href = '/chat';
+          </script>
+        </body>
+        </html>
+        """)
+    except HTTPException as e:
+        return HTMLResponse(f"""
+        <!doctype html>
+        <html>
+        <head><title>Authentication Error</title></head>
+        <body>
+          <script>
+            alert('Authentication failed: {e.detail}');
+            window.location.href = '/login';
+          </script>
+        </body>
+        </html>
+        """, status_code=e.status_code)
+
+@app.get("/auth/callback/microsoft")
+async def microsoft_callback(request: Request):
+    """Handle Microsoft OAuth callback"""
+    try:
+        result = await sso_auth.handle_microsoft_callback(request)
+        # Return HTML page that handles the token storage and redirect
+        return HTMLResponse(f"""
+        <!doctype html>
+        <html>
+        <head><title>Authentication Complete</title></head>
+        <body>
+          <script>
+            localStorage.setItem('auth_token', '{result["access_token"]}');
+            localStorage.setItem('user', '{json.dumps(result["user"])}');
+            localStorage.setItem('auth_provider', '{result["provider"]}');
+            window.location.href = '/chat';
+          </script>
+        </body>
+        </html>
+        """)
+    except HTTPException as e:
+        return HTMLResponse(f"""
+        <!doctype html>
+        <html>
+        <head><title>Authentication Error</title></head>
+        <body>
+          <script>
+            alert('Authentication failed: {e.detail}');
+            window.location.href = '/login';
+          </script>
+        </body>
+        </html>
+        """, status_code=e.status_code)
+
+@app.get("/auth/me")
+async def get_current_user_info(user = Depends(lambda: get_current_user_optional(database))):
+    """Get current user information"""
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return {"user": user}
+
+@app.post("/auth/logout")
+async def logout():
+    """Logout endpoint (client-side token removal)"""
+    return {"message": "Logged out successfully", "note": "Remove token from client storage"}
+
 # Serve static files (for web interface)
 if os.path.exists("static"):
     app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# Serve login page
+@app.get("/login", response_class=HTMLResponse)
+async def login_page():
+    file_path = os.path.join(os.path.dirname(__file__), "static", "login.html")
+    if os.path.exists(file_path):
+        return FileResponse(file_path)
+    return HTMLResponse("<h3>Login page not found</h3>", status_code=404)
 
 # Serve chat UI directly
 @app.get("/chat", response_class=HTMLResponse)
@@ -165,6 +262,14 @@ async def chat_page():
     if os.path.exists(file_path):
         return FileResponse(file_path)
     return HTMLResponse("<h3>Chat UI not found. Create static/chat.html</h3>", status_code=404)
+
+# Serve templates UI
+@app.get("/templates", response_class=HTMLResponse)
+async def templates_page():
+    file_path = os.path.join(os.path.dirname(__file__), "static", "templates.html")
+    if os.path.exists(file_path):
+        return FileResponse(file_path)
+    return HTMLResponse("<h3>Templates UI not found.</h3>", status_code=404)
 
 class ProfileRequest(BaseModel):
     name: str
@@ -213,7 +318,7 @@ def _derive_preferences_from_history(history_df: pd.DataFrame) -> dict:
     return preferences
 
 @app.post("/api/profile")
-async def get_profile_analysis(req: ProfileRequest) -> JSONResponse:
+async def get_profile_analysis(req: ProfileRequest, request: Request) -> JSONResponse:
     """Analyze a volunteer's profile by their name from the Excel dataset and suggest matches."""
     if volunteer_data is None:
         raise HTTPException(status_code=503, detail="Volunteer data not loaded")
@@ -363,18 +468,35 @@ async def get_profile_analysis(req: ProfileRequest) -> JSONResponse:
         "recommendations": recs,
         "summary": "\n".join(summary_lines)
     }
-    # Save context for subsequent AI chats
+    # Apply PII redaction based on user context
+    try:
+        user_context = get_user_context_from_request(request)
+        # Apply PII masking to the profile payload
+        masked_payload = pii_engine.mask_volunteer_profile(
+            profile_payload, 
+            user_context, 
+            target_user_id=str(contact_id)
+        )
+    except Exception as e:
+        print(f"⚠️ PII redaction error: {e}")
+        # Fall back to basic public masking
+        user_context = UserContext(permission_level=ViewPermissionLevel.PUBLIC)
+        masked_payload = pii_engine.mask_data(profile_payload, user_context)
+    
+    # Save context for subsequent AI chats (use original unmasked data)
     try:
         ai_assistant.add_context("profile", profile_payload)
     except Exception:
         pass
-    return JSONResponse(content=profile_payload)
+    
+    return JSONResponse(content=masked_payload)
 
 # Main chat interface
 @app.post("/api/chat")
 async def chat_with_assistant(
     chat_data: ChatMessage,
-    background_tasks: BackgroundTasks
+    background_tasks: BackgroundTasks,
+    current_user = Depends(lambda: get_current_user_optional(database))
 ) -> JSONResponse:
     """Main chat endpoint for the AI assistant"""
     
@@ -385,6 +507,9 @@ async def chat_with_assistant(
             conversation_id=chat_data.conversation_id
         )
         
+        # Use current user ID if available
+        user_id = current_user['id'] if current_user else chat_data.user_id
+        
         # Save to database in background
         if chat_data.conversation_id:
             background_tasks.add_task(
@@ -392,7 +517,7 @@ async def chat_with_assistant(
                 chat_data.conversation_id,
                 chat_data.message,
                 response.get('response', ''),
-                chat_data.user_id
+                user_id
             )
         
         # Track analytics
@@ -403,7 +528,7 @@ async def chat_with_assistant(
                 "message_length": len(chat_data.message),
                 "response_success": response.get('success', False)
             },
-            chat_data.user_id,
+            user_id,
             chat_data.conversation_id
         )
         
@@ -417,8 +542,9 @@ async def chat_with_assistant(
 @app.post("/api/match")
 async def get_volunteer_matches(
     preferences: UserPreferences,
-    user_id: Optional[str] = None,
-    background_tasks: BackgroundTasks = None
+    background_tasks: BackgroundTasks,
+    current_user = Depends(lambda: get_current_user_optional(database)),
+    user_id: Optional[str] = None
 ) -> JSONResponse:
     """Get personalized volunteer recommendations"""
     
@@ -454,18 +580,21 @@ async def get_volunteer_matches(
             "generated_at": datetime.now().isoformat()
         }
         
+        # Use current user ID if available, otherwise fallback to provided user_id
+        effective_user_id = current_user['id'] if current_user else user_id
+        
         # Save matches to database
-        if user_id:
+        if effective_user_id:
             background_tasks.add_task(
                 database.save_volunteer_matches,
-                user_id,
+                effective_user_id,
                 ml_matches
             )
             
             # Save preferences
             background_tasks.add_task(
                 database.save_user_preferences,
-                user_id,
+                effective_user_id,
                 preferences_dict
             )
         
@@ -478,7 +607,7 @@ async def get_volunteer_matches(
                 "matches_count": len(ml_matches),
                 "top_match_score": ml_matches[0]['score'] if ml_matches else 0
             },
-            user_id
+            effective_user_id
         )
         
         return JSONResponse(content=result)
@@ -512,7 +641,7 @@ async def create_user(user_data: UserProfile) -> JSONResponse:
         raise HTTPException(status_code=500, detail="User creation failed")
 
 @app.get("/api/users/{user_id}")
-async def get_user(user_id: str) -> JSONResponse:
+async def get_user(user_id: str, request: Request) -> JSONResponse:
     """Get user profile"""
     
     try:
@@ -525,12 +654,28 @@ async def get_user(user_id: str) -> JSONResponse:
             # Get user matches
             matches = await database.get_user_matches(user_id)
             
-            return JSONResponse(content={
+            response_data = {
                 "user": user,
                 "preferences": preferences,
                 "matches": matches,
                 "success": True
-            })
+            }
+            
+            # Apply PII redaction based on user context
+            try:
+                user_context = get_user_context_from_request(request)
+                masked_response = pii_engine.mask_volunteer_profile(
+                    response_data, 
+                    user_context, 
+                    target_user_id=user_id
+                )
+            except Exception as e:
+                print(f"⚠️ PII redaction error: {e}")
+                # Fall back to basic public masking
+                user_context = UserContext(permission_level=ViewPermissionLevel.PUBLIC)
+                masked_response = pii_engine.mask_data(response_data, user_context)
+            
+            return JSONResponse(content=masked_response)
         else:
             raise HTTPException(status_code=404, detail="User not found")
             
@@ -654,6 +799,260 @@ async def get_analytics(days: int = 30) -> JSONResponse:
         print(f"❌ Analytics error: {e}")
         raise HTTPException(status_code=500, detail="Analytics not available")
 
+# Google Calendar Integration Endpoints
+
+@app.get("/api/calendar/auth-url/{user_id}")
+async def get_calendar_auth_url(user_id: str) -> JSONResponse:
+    """Get Google Calendar OAuth authorization URL for a user"""
+    try:
+        redirect_uri = f"{settings.BASE_URL}/api/calendar/callback"
+        auth_url = calendar_client.get_authorization_url(user_id, redirect_uri)
+        
+        return JSONResponse(content={
+            "auth_url": auth_url,
+            "user_id": user_id,
+            "success": True
+        })
+        
+    except Exception as e:
+        logger.error(f"Error generating calendar auth URL: {e}")
+        raise HTTPException(status_code=500, detail="Failed to generate authorization URL")
+
+@app.get("/api/calendar/callback")
+async def calendar_auth_callback(code: str, state: str, error: str = None):
+    """Handle Google Calendar OAuth callback"""
+    if error:
+        return JSONResponse(content={"success": False, "error": error}, status_code=400)
+    
+    try:
+        user_id = state  # state parameter contains user_id
+        redirect_uri = f"{settings.BASE_URL}/api/calendar/callback"
+        
+        # Exchange code for tokens
+        token_data = calendar_client.exchange_code_for_tokens(user_id, code, redirect_uri)
+        
+        # Get user's calendar list to find primary calendar
+        calendars = calendar_client.list_calendars(user_id)
+        primary_calendar = next((cal for cal in calendars if cal.get('primary')), calendars[0] if calendars else None)
+        
+        # Save authentication data to database
+        auth_data = {
+            'user_id': user_id,
+            'access_token': token_data['access_token'],
+            'refresh_token': token_data['refresh_token'],
+            'expires_at': token_data['expires_at'],
+            'scopes': token_data['scopes'],
+            'calendar_id': primary_calendar['id'] if primary_calendar else 'primary',
+            'sync_enabled': True
+        }
+        
+        success = await database.save_google_calendar_auth(user_id, auth_data)
+        
+        if success:
+            # Track calendar connection event
+            await database.track_event(
+                "calendar_connected",
+                {"calendar_id": auth_data['calendar_id']},
+                user_id
+            )
+            
+            return JSONResponse(content={
+                "success": True,
+                "message": "Google Calendar connected successfully",
+                "calendar_id": auth_data['calendar_id']
+            })
+        else:
+            raise HTTPException(status_code=500, detail="Failed to save calendar authentication")
+            
+    except Exception as e:
+        logger.error(f"Error in calendar auth callback: {e}")
+        raise HTTPException(status_code=500, detail="Calendar authentication failed")
+
+@app.get("/api/calendar/status/{user_id}")
+async def get_calendar_status(user_id: str) -> JSONResponse:
+    """Get Google Calendar connection status for a user"""
+    try:
+        auth_data = await database.get_google_calendar_auth(user_id)
+        is_authenticated = calendar_client.is_user_authenticated(user_id)
+        
+        return JSONResponse(content={
+            "connected": auth_data is not None,
+            "authenticated": is_authenticated,
+            "sync_enabled": auth_data.get('sync_enabled', False) if auth_data else False,
+            "calendar_id": auth_data.get('calendar_id') if auth_data else None,
+            "email": auth_data.get('email') if auth_data else None
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting calendar status: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get calendar status")
+
+@app.post("/api/calendar/disconnect/{user_id}")
+async def disconnect_calendar(user_id: str) -> JSONResponse:
+    """Disconnect Google Calendar for a user"""
+    try:
+        # Revoke Google access
+        calendar_client.revoke_user_access(user_id)
+        
+        # Remove from database
+        await database.delete_google_calendar_auth(user_id)
+        
+        # Track disconnection
+        await database.track_event("calendar_disconnected", {}, user_id)
+        
+        return JSONResponse(content={
+            "success": True,
+            "message": "Google Calendar disconnected successfully"
+        })
+        
+    except Exception as e:
+        logger.error(f"Error disconnecting calendar: {e}")
+        raise HTTPException(status_code=500, detail="Failed to disconnect calendar")
+
+@app.post("/api/calendar/sync/{user_id}")
+async def sync_calendar(user_id: str, sync_request: CalendarSyncRequest) -> JSONResponse:
+    """Manually trigger calendar sync for a user"""
+    if not calendar_sync_service:
+        raise HTTPException(status_code=503, detail="Calendar sync service not available")
+    
+    try:
+        result = await calendar_sync_service.sync_volunteer_shifts(user_id, sync_request.sync_direction)
+        
+        # Track sync event
+        await database.track_event(
+            "calendar_sync",
+            {
+                "sync_direction": sync_request.sync_direction,
+                "result": result['summary']
+            },
+            user_id
+        )
+        
+        return JSONResponse(content=result)
+        
+    except Exception as e:
+        logger.error(f"Error syncing calendar: {e}")
+        raise HTTPException(status_code=500, detail="Calendar sync failed")
+
+@app.post("/api/shifts")
+async def create_volunteer_shift(shift_data: VolunteerShiftData, user_id: str) -> JSONResponse:
+    """Create a new volunteer shift"""
+    if not calendar_sync_service:
+        raise HTTPException(status_code=503, detail="Calendar sync service not available")
+    
+    try:
+        shift_dict = shift_data.dict()
+        shift_dict['user_id'] = user_id
+        
+        result = await calendar_sync_service.create_shift_with_calendar(shift_dict)
+        
+        # Track shift creation
+        await database.track_event(
+            "shift_created",
+            {
+                "project_name": shift_data.project_name,
+                "branch": shift_data.branch,
+                "calendar_synced": result.get('calendar_synced', False)
+            },
+            user_id
+        )
+        
+        return JSONResponse(content=result)
+        
+    except Exception as e:
+        logger.error(f"Error creating volunteer shift: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create volunteer shift")
+
+@app.put("/api/shifts/{shift_id}")
+async def update_volunteer_shift(shift_id: str, shift_updates: VolunteerShiftData, user_id: str) -> JSONResponse:
+    """Update a volunteer shift"""
+    if not calendar_sync_service:
+        raise HTTPException(status_code=503, detail="Calendar sync service not available")
+    
+    try:
+        updates = shift_updates.dict(exclude_unset=True)
+        updates['user_id'] = user_id
+        
+        result = await calendar_sync_service.update_shift_with_calendar(shift_id, updates)
+        
+        # Track shift update
+        await database.track_event(
+            "shift_updated",
+            {
+                "shift_id": shift_id,
+                "calendar_synced": result.get('calendar_synced', False)
+            },
+            user_id
+        )
+        
+        return JSONResponse(content=result)
+        
+    except Exception as e:
+        logger.error(f"Error updating volunteer shift: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update volunteer shift")
+
+@app.delete("/api/shifts/{shift_id}")
+async def delete_volunteer_shift(shift_id: str, user_id: str) -> JSONResponse:
+    """Delete a volunteer shift"""
+    if not calendar_sync_service:
+        raise HTTPException(status_code=503, detail="Calendar sync service not available")
+    
+    try:
+        result = await calendar_sync_service.delete_shift_with_calendar(shift_id, user_id)
+        
+        # Track shift deletion
+        await database.track_event(
+            "shift_deleted",
+            {
+                "shift_id": shift_id,
+                "calendar_deleted": result.get('calendar_deleted', False)
+            },
+            user_id
+        )
+        
+        return JSONResponse(content=result)
+        
+    except Exception as e:
+        logger.error(f"Error deleting volunteer shift: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete volunteer shift")
+
+@app.get("/api/shifts/{user_id}")
+async def get_volunteer_shifts(user_id: str, 
+                              start_date: Optional[str] = None,
+                              end_date: Optional[str] = None) -> JSONResponse:
+    """Get volunteer shifts for a user"""
+    try:
+        start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00')) if start_date else None
+        end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00')) if end_date else None
+        
+        shifts = await database.get_volunteer_shifts(user_id, start_dt, end_dt)
+        
+        return JSONResponse(content={
+            "shifts": shifts,
+            "user_id": user_id,
+            "count": len(shifts)
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting volunteer shifts: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get volunteer shifts")
+
+@app.get("/api/calendar/sync-history/{user_id}")
+async def get_sync_history(user_id: str, limit: int = 50) -> JSONResponse:
+    """Get calendar sync history for a user"""
+    try:
+        history = await database.get_sync_history(user_id, limit)
+        
+        return JSONResponse(content={
+            "sync_history": history,
+            "user_id": user_id,
+            "count": len(history)
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting sync history: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get sync history")
+
 # Resources and information
 @app.get("/api/resources")
 async def get_resources() -> JSONResponse:
@@ -692,269 +1091,7 @@ async def get_resources() -> JSONResponse:
             "Youth Development": "Mentoring, after-school programs, summer camps",
             "Fitness & Wellness": "Group exercise, swimming instruction, sports coaching",
             "Special Events": "Fundraisers, community celebrations, holiday programs",
-            "Facility Support": "Maintenance, organization, member services",
-            "Administrative": "Office support, data entry, communications"
-        }
-    }
-    
-    return JSONResponse(content=resources)
-
-# SMS Endpoints
-@app.post("/api/sms/send")
-async def send_sms(sms_request: SMSRequest) -> JSONResponse:
-    """Send SMS message"""
-    
-    try:
-        from sms_service import SMSType
-        
-        # Convert string to enum
-        sms_type = SMSType.REMINDER
-        if sms_request.sms_type == "confirmation":
-            sms_type = SMSType.CONFIRMATION
-        elif sms_request.sms_type == "welcome":
-            sms_type = SMSType.WELCOME
-        elif sms_request.sms_type == "follow_up":
-            sms_type = SMSType.FOLLOW_UP
-        
-        result = await sms_service.send_sms(
-            to_phone=sms_request.phone,
-            message=sms_request.message,
-            sms_type=sms_type,
-            user_id=sms_request.user_id
-        )
-        
-        return JSONResponse(content=result)
-        
-    except Exception as e:
-        print(f"❌ SMS send error: {e}")
-        raise HTTPException(status_code=500, detail="Failed to send SMS")
-
-@app.post("/api/sms/reminder")
-async def send_reminder(reminder_request: SMSReminderRequest) -> JSONResponse:
-    """Send volunteer reminder SMS"""
-    
-    try:
-        result = await sms_service.send_volunteer_reminder(
-            user_id=reminder_request.user_id,
-            phone=reminder_request.phone,
-            volunteer_opportunity=reminder_request.opportunity
-        )
-        
-        if result["success"]:
-            # Track reminder sent
-            await database.track_event(
-                "reminder_sent",
-                {
-                    "phone": reminder_request.phone,
-                    "opportunity": reminder_request.opportunity
-                },
-                reminder_request.user_id
-            )
-        
-        return JSONResponse(content=result)
-        
-    except Exception as e:
-        print(f"❌ Reminder error: {e}")
-        raise HTTPException(status_code=500, detail="Failed to send reminder")
-
-@app.post("/api/sms/confirmation")
-async def send_confirmation(user_id: str, phone: str, event_details: Dict[str, Any]) -> JSONResponse:
-    """Send confirmation request SMS"""
-    
-    try:
-        result = await sms_service.send_confirmation_request(
-            user_id=user_id,
-            phone=phone,
-            event_details=event_details
-        )
-        
-        return JSONResponse(content=result)
-        
-    except Exception as e:
-        print(f"❌ Confirmation error: {e}")
-        raise HTTPException(status_code=500, detail="Failed to send confirmation")
-
-@app.post("/api/sms/welcome")
-async def send_welcome(user_id: str, phone: str, user_name: str = None) -> JSONResponse:
-    """Send welcome SMS to new volunteer"""
-    
-    try:
-        result = await sms_service.send_welcome_message(
-            user_id=user_id,
-            phone=phone,
-            user_name=user_name
-        )
-        
-        return JSONResponse(content=result)
-        
-    except Exception as e:
-        print(f"❌ Welcome SMS error: {e}")
-        raise HTTPException(status_code=500, detail="Failed to send welcome SMS")
-
-@app.post("/webhooks/sms")
-async def sms_webhook(request: SMSWebhookData) -> JSONResponse:
-    """Webhook endpoint for incoming Twilio SMS messages"""
-    
-    try:
-        # Process the incoming SMS
-        result = await sms_service.process_incoming_sms(
-            from_phone=request.From,
-            message_body=request.Body,
-            twilio_sid=request.MessageSid
-        )
-        
-        # Log webhook processing
-        await database.track_event(
-            "sms_webhook_processed",
-            {
-                "from": request.From,
-                "message_sid": request.MessageSid,
-                "success": result["success"],
-                "action_taken": result.get("action_taken")
-            }
-        )
-        
-        return JSONResponse(content={"status": "processed", "result": result})
-        
-    except Exception as e:
-        print(f"❌ SMS webhook error: {e}")
-        
-        # Log webhook error
-        await database.track_event(
-            "sms_webhook_error",
-            {
-                "from": request.From,
-                "message_sid": request.MessageSid,
-                "error": str(e)
-            }
-        )
-        
-        return JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
-
-@app.get("/webhooks/sms")
-async def sms_webhook_get():
-    """GET endpoint for SMS webhook verification"""
-    return JSONResponse(content={"status": "SMS webhook endpoint active"})
-
-# SMS Analytics and History
-@app.get("/api/sms/analytics")
-async def get_sms_analytics(days: int = 30) -> JSONResponse:
-    """Get SMS usage analytics"""
-    
-    try:
-        analytics = await database.get_sms_analytics(days)
-        
-        return JSONResponse(content=analytics)
-        
-    except Exception as e:
-        print(f"❌ SMS analytics error: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get SMS analytics")
-
-@app.get("/api/sms/history/{user_id}")
-async def get_sms_history(user_id: str, limit: int = 50) -> JSONResponse:
-    """Get SMS history for a user"""
-    
-    try:
-        history = await database.get_sms_history(user_id=user_id, limit=limit)
-        
-        return JSONResponse(content={"history": history, "count": len(history)})
-        
-    except Exception as e:
-        print(f"❌ SMS history error: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get SMS history")
-
-@app.get("/api/sms/preferences/{user_id}")
-async def get_sms_preferences(user_id: str) -> JSONResponse:
-    """Get SMS preferences for a user"""
-    
-    try:
-        preferences = await database.get_sms_preferences(user_id=user_id)
-        
-        if preferences:
-            return JSONResponse(content=preferences)
-        else:
-            return JSONResponse(content={"is_subscribed": True, "preferences": {}})
-        
-    except Exception as e:
-        print(f"❌ SMS preferences error: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get SMS preferences")
-
-@app.post("/api/sms/preferences/{user_id}")
-async def update_sms_preferences(user_id: str, is_subscribed: bool = True, preferences: Dict[str, Any] = None) -> JSONResponse:
-    """Update SMS preferences for a user"""
-    
-    try:
-        # Get user to get phone number
-        user = await database.get_user(user_id=user_id)
-        if not user or not user.get('phone'):
-            raise HTTPException(status_code=404, detail="User not found or no phone number")
-        
-        success = await database.save_sms_preferences(
-            user_id=user_id,
-            phone_number=user['phone'],
-            is_subscribed=is_subscribed,
-            preferences=preferences or {}
-        )
-        
-        if success:
-            # Track preference update
-            await database.track_event(
-                "sms_preferences_updated",
-                {
-                    "is_subscribed": is_subscribed,
-                    "preferences": preferences
-                },
-                user_id
-            )
-            
-            return JSONResponse(content={"success": True, "is_subscribed": is_subscribed})
-        else:
-            raise HTTPException(status_code=400, detail="Failed to update preferences")
-        
-    except Exception as e:
-        print(f"❌ SMS preferences update error: {e}")
-        raise HTTPException(status_code=500, detail="Failed to update SMS preferences")
-
-# Enhanced user creation with SMS welcome
-@app.post("/api/users/with-sms")
-async def create_user_with_sms(user_data: UserProfile) -> JSONResponse:
-    """Create a new user profile and send welcome SMS if phone provided"""
-    
-    try:
-        user = await database.create_user(user_data.dict(exclude_unset=True))
-        
-        if user:
-            user_id = user['id']
-            
-            # Send welcome SMS if phone number provided
-            if user_data.phone:
-                welcome_name = f"{user_data.first_name or ''} {user_data.last_name or ''}".strip()
-                sms_result = await sms_service.send_welcome_message(
-                    user_id=user_id,
-                    phone=user_data.phone,
-                    user_name=welcome_name or None
-                )
-                
-                user['sms_welcome_sent'] = sms_result.get('success', False)
-            
-            # Track user creation
-            await database.track_event(
-                "user_created_with_sms",
-                {
-                    "source": "api",
-                    "sms_enabled": user_data.phone is not None,
-                    "sms_sent": user.get('sms_welcome_sent', False)
-                },
-                user_id
-            )
-            
-            return JSONResponse(content={"user": user, "success": True})
-        else:
-            raise HTTPException(status_code=400, detail="Failed to create user")
-            
-    except Exception as e:
-        print(f"❌ User creation with SMS error: {e}")
-        raise HTTPException(status_code=500, detail="User creation failed")
+            "Facility Suppor
 
 # Main web interface
 @app.get("/", response_class=HTMLResponse)
@@ -993,7 +1130,7 @@ async def main_interface():
         <section class=\"hero\">
           <h1>YMCA Volunteer PathFinder</h1>
           <p class=\"lead\">An AI assistant that helps you explore, understand, and navigate YMCA volunteer opportunities.</p>
-          <a class=\"cta\" href=\"/chat\">Start Chat</a>
+
         </section>
 
         <section class=\"section\">
@@ -1062,6 +1199,8 @@ async def main_interface():
     </html>
     """)
 
+
+
 # Background task helpers
 async def save_conversation_message(conversation_id: str, user_message: str, 
                                   ai_response: str, user_id: str = None):
@@ -1071,6 +1210,9 @@ async def save_conversation_message(conversation_id: str, user_message: str,
         await database.save_message(conversation_id, 'assistant', ai_response, user_id)
     except Exception as e:
         print(f"❌ Error saving conversation: {e}")
+
+# Set up reimbursement API endpoints
+setup_reimbursement_api(app, database, reimbursement_manager)
 
 # Run the application
 if __name__ == "__main__":
