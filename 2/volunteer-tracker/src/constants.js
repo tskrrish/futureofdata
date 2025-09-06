@@ -127,3 +127,37 @@ export function getStoryworldChipClass(storyworldName) {
   if (name.includes('sports')) return STORYWORLD_COLORS["Sports"]
   return 'sw-neutral'
 }
+
+// Streak configurations  
+export const STREAK_TYPES = {
+  weekly: {
+    name: "Weekly Streak",
+    description: "Volunteer at least once per week",
+    icon: "🔥",
+    color: "#FF6B35"
+  },
+  monthly: {
+    name: "Monthly Streak", 
+    description: "Volunteer at least once per month",
+    icon: "⭐",
+    color: "#FFD700"
+  }
+}
+
+// Streak milestone rewards
+export const STREAK_MILESTONES = [
+  { threshold: 2, label: "Streak Starter", description: "Started building consistency" },
+  { threshold: 4, label: "Consistent Contributor", description: "One month of consistency" },
+  { threshold: 8, label: "Streak Champion", description: "Two months strong" },
+  { threshold: 12, label: "Dedicated Streaker", description: "Three months of commitment" },
+  { threshold: 24, label: "Streak Master", description: "Six months of unwavering dedication" },
+  { threshold: 52, label: "Legendary Streaker", description: "One year of consistent service" }
+]
+
+export function getStreakIcon(streakType) {
+  return STREAK_TYPES[streakType]?.icon || "🔥"
+}
+
+export function getStreakColor(streakType) {
+  return STREAK_TYPES[streakType]?.color || "#FF6B35"
+}

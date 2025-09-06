@@ -16,9 +16,23 @@ from shared_constants import (
     STORYWORLD_KEYWORDS,
     compute_milestones,
 )
+from streak_service import get_streak_summary
 
 
 DATA_PATH = Path(__file__).resolve().parent.parent / "Y_Volunteer_Raw_Data_Jan_August_2025.csv"
+
+
+class StreakInfo(BaseModel):
+    current_streak: int
+    longest_streak: int
+    is_active: bool
+    grace_days_remaining: int
+    milestones: List[str]
+
+
+class VolunteerStreaks(BaseModel):
+    weekly: StreakInfo
+    monthly: StreakInfo
 
 
 class VolunteerAggregate(BaseModel):
@@ -34,6 +48,7 @@ class VolunteerAggregate(BaseModel):
     projects: List[str]
     storyworlds: List[str]
     branches: List[str]
+    streaks: VolunteerStreaks
 
 
 
@@ -123,6 +138,25 @@ def aggregate_by_volunteer(df: pd.DataFrame) -> List[VolunteerAggregate]:
                 if sw not in storyworlds_set:
                     storyworlds_set.append(sw)
 
+        # Calculate streak information
+        streak_summary = get_streak_summary(g)
+        volunteer_streaks = VolunteerStreaks(
+            weekly=StreakInfo(
+                current_streak=streak_summary['weekly']['current_streak'],
+                longest_streak=streak_summary['weekly']['longest_streak'],
+                is_active=streak_summary['weekly']['is_active'],
+                grace_days_remaining=streak_summary['weekly']['grace_days_remaining'],
+                milestones=streak_summary['weekly']['milestones']
+            ),
+            monthly=StreakInfo(
+                current_streak=streak_summary['monthly']['current_streak'],
+                longest_streak=streak_summary['monthly']['longest_streak'],
+                is_active=streak_summary['monthly']['is_active'],
+                grace_days_remaining=streak_summary['monthly']['grace_days_remaining'],
+                milestones=streak_summary['monthly']['milestones']
+            )
+        )
+
         results.append(
             VolunteerAggregate(
                 contact_id=int(contact_id) if pd.notna(contact_id) else None,
@@ -137,6 +171,7 @@ def aggregate_by_volunteer(df: pd.DataFrame) -> List[VolunteerAggregate]:
                 projects=projects[:6],
                 storyworlds=storyworlds_set[:5],
                 branches=branches[:5],
+                streaks=volunteer_streaks,
             )
         )
     # Sort by total hours desc
@@ -232,6 +267,59 @@ def volunteer_by_email(email: str = Query(..., description="Volunteer email (cas
             if v.email == needle:
                 return v
         raise HTTPException(status_code=404, detail="Volunteer not found")
+    except (FileNotFoundError, ValueError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+class StreakLeaderboard(BaseModel):
+    volunteer_name: str
+    contact_id: Optional[int]
+    current_streak: int
+    longest_streak: int
+    is_active: bool
+    grace_days_remaining: int
+
+
+@app.get("/streak_leaderboard")
+def streak_leaderboard(
+    streak_type: str = Query("weekly", description="Streak type: 'weekly' or 'monthly'"),
+    sort_by: str = Query("current", description="Sort by 'current' or 'longest' streak"),
+    limit: int = Query(50, description="Maximum number of results")
+) -> Dict[str, List[StreakLeaderboard]]:
+    """Get streak leaderboard for weekly or monthly streaks."""
+    try:
+        if streak_type not in ["weekly", "monthly"]:
+            raise HTTPException(status_code=400, detail="streak_type must be 'weekly' or 'monthly'")
+        
+        if sort_by not in ["current", "longest"]:
+            raise HTTPException(status_code=400, detail="sort_by must be 'current' or 'longest'")
+        
+        df = load_dataframe(DATA_PATH)
+        df = filter_date_range(df, "2024-01-01", None)
+        agg = aggregate_by_volunteer(df)
+        
+        # Extract streak data for leaderboard
+        leaderboard_data = []
+        for volunteer in agg:
+            streak_info = volunteer.streaks.weekly if streak_type == "weekly" else volunteer.streaks.monthly
+            
+            leaderboard_data.append(StreakLeaderboard(
+                volunteer_name=f"{volunteer.first_name} {volunteer.last_name}",
+                contact_id=volunteer.contact_id,
+                current_streak=streak_info.current_streak,
+                longest_streak=streak_info.longest_streak,
+                is_active=streak_info.is_active,
+                grace_days_remaining=streak_info.grace_days_remaining
+            ))
+        
+        # Sort by requested criteria
+        if sort_by == "current":
+            leaderboard_data.sort(key=lambda x: x.current_streak, reverse=True)
+        else:  # sort_by == "longest"
+            leaderboard_data.sort(key=lambda x: x.longest_streak, reverse=True)
+        
+        return {"leaderboard": leaderboard_data[:limit]}
+        
     except (FileNotFoundError, ValueError) as e:
         raise HTTPException(status_code=400, detail=str(e))
 

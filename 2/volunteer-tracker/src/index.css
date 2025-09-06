@@ -699,3 +699,108 @@ body {
   0% { opacity: 0.3; transform: translate(-50%, -50%) scale(0.8); }
   100% { opacity: 0.6; transform: translate(-50%, -50%) scale(1.2); }
 }
+
+/* Streak Component Styling */
+.streaks-section {
+  margin-top: 1rem;
+  padding: 0.5rem 0;
+}
+
+.streaks-title {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #666;
+  margin-bottom: 0.5rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.streak-badges {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.streak-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem;
+  border-radius: 0.5rem;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  transition: all 0.2s ease;
+}
+
+.streak-badge.active {
+  background: rgba(255, 107, 53, 0.2);
+  border-color: rgba(255, 107, 53, 0.4);
+  box-shadow: 0 0 10px rgba(255, 107, 53, 0.3);
+}
+
+.streak-badge.grace {
+  background: rgba(255, 193, 7, 0.2);
+  border-color: rgba(255, 193, 7, 0.4);
+  animation: grace-pulse 2s ease-in-out infinite;
+}
+
+@keyframes grace-pulse {
+  0%, 100% { opacity: 0.8; }
+  50% { opacity: 1; }
+}
+
+.streak-icon {
+  font-size: 1.2rem;
+  min-width: 1.5rem;
+  text-align: center;
+}
+
+.streak-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.streak-type {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #fff;
+}
+
+.streak-stats {
+  display: flex;
+  gap: 0.5rem;
+  font-size: 0.625rem;
+  color: #ccc;
+}
+
+.current-streak {
+  font-weight: 600;
+  color: #FF6B35;
+}
+
+.longest-streak {
+  color: #999;
+  font-style: italic;
+}
+
+.grace-period {
+  font-size: 0.6rem;
+  color: #ffc107;
+  font-weight: 500;
+  animation: grace-blink 1.5s ease-in-out infinite;
+}
+
+@keyframes grace-blink {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 1; }
+}
+
+.streak-milestones {
+  font-size: 0.6rem;
+  color: #4ade80;
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.025em;
+}
