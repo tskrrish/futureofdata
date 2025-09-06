@@ -20,6 +20,7 @@ from ai_assistant import VolunteerAIAssistant
 from matching_engine import VolunteerMatchingEngine
 from data_processor import VolunteerDataProcessor
 from database import VolunteerDatabase
+from anomaly_alerting import AnomalyAlertingOrchestrator
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -43,6 +44,7 @@ ai_assistant = VolunteerAIAssistant()
 database = VolunteerDatabase()
 volunteer_data = None
 matching_engine = None
+anomaly_orchestrator = None
 
 # Pydantic models
 class UserProfile(BaseModel):
@@ -82,7 +84,7 @@ class FeedbackData(BaseModel):
 @app.on_event("startup")
 async def startup_event():
     """Initialize application data and models"""
-    global volunteer_data, matching_engine
+    global volunteer_data, matching_engine, anomaly_orchestrator
     
     print("🚀 Starting Volunteer PathFinder AI Assistant...")
     
@@ -106,6 +108,15 @@ async def startup_event():
             
             print(f"✅ Loaded {len(volunteer_data['volunteers'])} volunteer profiles")
             print(f"✅ Loaded {len(volunteer_data['projects'])} projects")
+            
+            # Initialize anomaly detection orchestrator
+            anomaly_orchestrator = AnomalyAlertingOrchestrator(volunteer_data)
+            print("✅ Anomaly alerting system initialized")
+            
+            # Start continuous monitoring in background
+            asyncio.create_task(anomaly_orchestrator.run_continuous_monitoring())
+            print("✅ Started anomaly monitoring background task")
+            
         else:
             print(f"⚠️  Volunteer data file not found: {settings.VOLUNTEER_DATA_PATH}")
     except Exception as e:
@@ -130,7 +141,9 @@ async def health_check():
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
         "data_loaded": volunteer_data is not None,
-        "models_ready": matching_engine is not None and matching_engine.models_trained
+        "models_ready": matching_engine is not None and matching_engine.models_trained,
+        "anomaly_detection_ready": anomaly_orchestrator is not None,
+        "anomaly_summary": anomaly_orchestrator.get_alert_summary(1) if anomaly_orchestrator else None
     }
 
 # Serve static files (for web interface)
@@ -632,6 +645,139 @@ async def get_analytics(days: int = 30) -> JSONResponse:
     except Exception as e:
         print(f"❌ Analytics error: {e}")
         raise HTTPException(status_code=500, detail="Analytics not available")
+
+# Anomaly Alerting endpoints
+@app.get("/api/anomalies/detect")
+async def trigger_anomaly_detection() -> JSONResponse:
+    """Manually trigger anomaly detection cycle"""
+    
+    if not anomaly_orchestrator:
+        raise HTTPException(status_code=503, detail="Anomaly detection service not available")
+    
+    try:
+        alerts = await anomaly_orchestrator.run_detection_cycle()
+        
+        return JSONResponse(content={
+            "alerts_detected": len(alerts),
+            "alerts": [
+                {
+                    "type": alert.anomaly_type.value,
+                    "severity": alert.severity.value,
+                    "title": alert.title,
+                    "description": alert.description,
+                    "timestamp": alert.timestamp.isoformat(),
+                    "affected_entities": alert.affected_entities,
+                    "metrics": alert.metrics
+                }
+                for alert in alerts
+            ]
+        })
+        
+    except Exception as e:
+        print(f"❌ Anomaly detection error: {e}")
+        raise HTTPException(status_code=500, detail="Anomaly detection failed")
+
+@app.get("/api/anomalies/summary")
+async def get_anomaly_summary(days: int = 7) -> JSONResponse:
+    """Get summary of recent anomaly alerts"""
+    
+    if not anomaly_orchestrator:
+        raise HTTPException(status_code=503, detail="Anomaly detection service not available")
+    
+    try:
+        summary = anomaly_orchestrator.get_alert_summary(days)
+        
+        return JSONResponse(content={
+            "summary_period_days": days,
+            **summary
+        })
+        
+    except Exception as e:
+        print(f"❌ Anomaly summary error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get anomaly summary")
+
+@app.get("/api/anomalies/history")
+async def get_anomaly_history(limit: int = 50) -> JSONResponse:
+    """Get recent anomaly alert history"""
+    
+    if not anomaly_orchestrator:
+        raise HTTPException(status_code=503, detail="Anomaly detection service not available")
+    
+    try:
+        # Get recent alerts from history
+        recent_alerts = sorted(anomaly_orchestrator.alert_history, 
+                             key=lambda x: x.timestamp, reverse=True)[:limit]
+        
+        alerts_data = []
+        for alert in recent_alerts:
+            alerts_data.append({
+                "type": alert.anomaly_type.value,
+                "severity": alert.severity.value,
+                "title": alert.title,
+                "description": alert.description,
+                "timestamp": alert.timestamp.isoformat(),
+                "affected_entities": alert.affected_entities,
+                "root_cause_hints": alert.root_cause_hints[:3],  # Top 3 hints
+                "recommended_actions": alert.recommended_actions[:3],  # Top 3 actions
+                "metrics": alert.metrics
+            })
+        
+        return JSONResponse(content={
+            "total_alerts": len(recent_alerts),
+            "alerts": alerts_data
+        })
+        
+    except Exception as e:
+        print(f"❌ Anomaly history error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get anomaly history")
+
+@app.post("/api/anomalies/test-alert")
+async def test_anomaly_alert() -> JSONResponse:
+    """Send a test anomaly alert to verify notification systems"""
+    
+    if not anomaly_orchestrator:
+        raise HTTPException(status_code=503, detail="Anomaly detection service not available")
+    
+    try:
+        from anomaly_alerting import AnomalyAlert, AnomalyType, AlertSeverity
+        
+        # Create test alert
+        test_alert = AnomalyAlert(
+            anomaly_type=AnomalyType.VOLUNTEER_DROP,
+            severity=AlertSeverity.MEDIUM,
+            title="Test Alert - Anomaly Detection System",
+            description="This is a test alert to verify the anomaly detection and notification system is working correctly.",
+            root_cause_hints=[
+                "This is a test alert for system verification",
+                "Check notification channels (Slack, Email)",
+                "Verify alert formatting and delivery"
+            ],
+            affected_entities=["Test System"],
+            metrics={"test_metric": "system_check", "timestamp": datetime.now().isoformat()},
+            timestamp=datetime.now(),
+            recommended_actions=[
+                "Confirm alert was received in Slack",
+                "Check email delivery if configured",
+                "Verify alert formatting is correct"
+            ]
+        )
+        
+        # Send notifications
+        await anomaly_orchestrator._send_notifications([test_alert])
+        
+        return JSONResponse(content={
+            "success": True,
+            "message": "Test alert sent successfully",
+            "alert": {
+                "title": test_alert.title,
+                "severity": test_alert.severity.value,
+                "timestamp": test_alert.timestamp.isoformat()
+            }
+        })
+        
+    except Exception as e:
+        print(f"❌ Test alert error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to send test alert")
 
 # Resources and information
 @app.get("/api/resources")
