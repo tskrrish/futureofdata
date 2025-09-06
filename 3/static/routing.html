@@ -1,0 +1,489 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>YMCA Volunteer Routing Optimizer</title>
+  <style>
+    :root {
+      --bg: #ffffff; --fg: #111111; --muted: #6b7280; --border: #e5e7eb; 
+      --accent: #4f46e5; --success: #10b981; --warning: #f59e0b; --danger: #ef4444;
+    }
+    * { box-sizing: border-box; }
+    body { 
+      margin: 0; 
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto; 
+      background: var(--bg); 
+      color: var(--fg); 
+    }
+    .header { 
+      padding: 20px; 
+      border-bottom: 1px solid var(--border); 
+      background: #fafbff; 
+    }
+    h1 { margin: 0 0 8px 0; font-size: 28px; }
+    .subtitle { color: var(--muted); font-size: 16px; margin: 0; }
+    .nav { margin: 16px 0 0 0; }
+    .nav a { 
+      display: inline-block; 
+      padding: 8px 16px; 
+      margin-right: 8px; 
+      background: var(--accent); 
+      color: white; 
+      text-decoration: none; 
+      border-radius: 6px; 
+      font-size: 14px; 
+    }
+    .nav a.secondary { background: var(--muted); }
+    .container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+    .tabs { 
+      display: flex; 
+      border-bottom: 1px solid var(--border); 
+      margin-bottom: 20px; 
+    }
+    .tab { 
+      padding: 12px 20px; 
+      cursor: pointer; 
+      border-bottom: 2px solid transparent; 
+      font-weight: 500; 
+    }
+    .tab.active { border-bottom-color: var(--accent); color: var(--accent); }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+    .card { 
+      background: white; 
+      border: 1px solid var(--border); 
+      border-radius: 8px; 
+      padding: 20px; 
+      margin-bottom: 20px; 
+    }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+    .stat { text-align: center; padding: 16px; }
+    .stat-value { font-size: 24px; font-weight: bold; color: var(--accent); }
+    .stat-label { color: var(--muted); font-size: 14px; margin-top: 4px; }
+    .suggestion { 
+      border: 1px solid var(--border); 
+      border-radius: 8px; 
+      padding: 16px; 
+      margin-bottom: 16px; 
+      background: #fafbff; 
+    }
+    .suggestion-header { 
+      display: flex; 
+      justify-content: space-between; 
+      align-items: center; 
+      margin-bottom: 12px; 
+    }
+    .improvement-badge { 
+      background: var(--success); 
+      color: white; 
+      padding: 4px 8px; 
+      border-radius: 12px; 
+      font-size: 12px; 
+      font-weight: bold; 
+    }
+    .volunteer-swap { 
+      display: grid; 
+      grid-template-columns: 1fr auto 1fr; 
+      gap: 16px; 
+      align-items: center; 
+      margin: 12px 0; 
+    }
+    .volunteer-info { 
+      background: white; 
+      padding: 12px; 
+      border-radius: 6px; 
+      border: 1px solid var(--border); 
+    }
+    .volunteer-name { font-weight: bold; margin-bottom: 4px; }
+    .project-name { color: var(--muted); font-size: 14px; }
+    .swap-arrow { 
+      text-align: center; 
+      color: var(--accent); 
+      font-size: 20px; 
+      font-weight: bold; 
+    }
+    .reasons { margin-top: 12px; }
+    .reason { 
+      background: var(--bg); 
+      padding: 8px 12px; 
+      margin: 4px 0; 
+      border-radius: 6px; 
+      font-size: 14px; 
+      border-left: 3px solid var(--success); 
+    }
+    .assignment { 
+      display: flex; 
+      justify-content: space-between; 
+      align-items: center; 
+      padding: 12px; 
+      border: 1px solid var(--border); 
+      border-radius: 6px; 
+      margin-bottom: 8px; 
+    }
+    .assignment.low { border-left: 4px solid var(--danger); }
+    .assignment.medium { border-left: 4px solid var(--warning); }
+    .assignment.high { border-left: 4px solid var(--success); }
+    .fit-score { 
+      padding: 4px 8px; 
+      border-radius: 12px; 
+      font-size: 12px; 
+      font-weight: bold; 
+    }
+    .fit-score.low { background: #fee2e2; color: var(--danger); }
+    .fit-score.medium { background: #fef3c7; color: #92400e; }
+    .fit-score.high { background: #d1fae5; color: #065f46; }
+    .loading { 
+      text-align: center; 
+      padding: 40px; 
+      color: var(--muted); 
+    }
+    .error { 
+      background: #fee2e2; 
+      color: var(--danger); 
+      padding: 16px; 
+      border-radius: 8px; 
+      margin: 16px 0; 
+    }
+    .empty-state { 
+      text-align: center; 
+      padding: 40px; 
+      color: var(--muted); 
+    }
+    .refresh-btn { 
+      background: var(--accent); 
+      color: white; 
+      border: none; 
+      padding: 8px 16px; 
+      border-radius: 6px; 
+      cursor: pointer; 
+      font-size: 14px; 
+    }
+    .branch-selector { 
+      margin-bottom: 20px; 
+    }
+    select { 
+      padding: 8px 12px; 
+      border: 1px solid var(--border); 
+      border-radius: 6px; 
+      margin-right: 12px; 
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>Volunteer Routing Optimizer</h1>
+    <p class="subtitle">Optimize volunteer assignments for better coverage and fit</p>
+    <div class="nav">
+      <a href="/chat">Chat Assistant</a>
+      <a href="/" class="secondary">Home</a>
+    </div>
+  </div>
+
+  <div class="container">
+    <!-- Overview Stats -->
+    <div class="card">
+      <div class="grid" id="stats-grid">
+        <div class="stat">
+          <div class="stat-value" id="total-assignments">-</div>
+          <div class="stat-label">Total Assignments</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value" id="avg-fit-score">-</div>
+          <div class="stat-label">Average Fit Score</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value" id="swap-opportunities">-</div>
+          <div class="stat-label">Swap Opportunities</div>
+        </div>
+        <div class="stat">
+          <div class="stat-value" id="low-fit-count">-</div>
+          <div class="stat-label">Low Fit Assignments</div>
+        </div>
+      </div>
+      <div style="text-align: center; margin-top: 16px;">
+        <button class="refresh-btn" onclick="refreshData()">Refresh Data</button>
+      </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tabs">
+      <div class="tab active" onclick="switchTab('swap-suggestions')">Swap Suggestions</div>
+      <div class="tab" onclick="switchTab('current-assignments')">Current Assignments</div>
+      <div class="tab" onclick="switchTab('branch-coverage')">Branch Coverage</div>
+    </div>
+
+    <!-- Swap Suggestions Tab -->
+    <div id="swap-suggestions-tab" class="tab-content active">
+      <div class="card">
+        <h3>Better Fit Swap Suggestions</h3>
+        <p style="color: var(--muted); margin-bottom: 20px;">
+          These suggestions show volunteer pairs who would be better matched if they swapped projects.
+        </p>
+        <div id="swap-suggestions-list">
+          <div class="loading">Loading swap suggestions...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Current Assignments Tab -->
+    <div id="current-assignments-tab" class="tab-content">
+      <div class="card">
+        <h3>Current Volunteer Assignments</h3>
+        <p style="color: var(--muted); margin-bottom: 20px;">
+          Current assignments sorted by fit score to identify improvement opportunities.
+        </p>
+        <div id="assignments-list">
+          <div class="loading">Loading current assignments...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Branch Coverage Tab -->
+    <div id="branch-coverage-tab" class="tab-content">
+      <div class="card">
+        <h3>Branch Coverage Analysis</h3>
+        <div class="branch-selector">
+          <select id="branch-select">
+            <option value="">Select a branch...</option>
+            <option value="Blue Ash">Blue Ash YMCA</option>
+            <option value="Lyons">M.E. Lyons YMCA</option>
+            <option value="Campbell">Campbell County YMCA</option>
+            <option value="Clippard">Clippard YMCA</option>
+          </select>
+          <button class="refresh-btn" onclick="analyzeBranch()">Analyze Coverage</button>
+        </div>
+        <div id="branch-analysis">
+          <div class="empty-state">Select a branch to analyze coverage optimization opportunities.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Tab switching
+    function switchTab(tabName) {
+      // Hide all tabs
+      document.querySelectorAll('.tab-content').forEach(content => {
+        content.classList.remove('active');
+      });
+      document.querySelectorAll('.tab').forEach(tab => {
+        tab.classList.remove('active');
+      });
+
+      // Show selected tab
+      document.getElementById(tabName + '-tab').classList.add('active');
+      event.target.classList.add('active');
+
+      // Load data for the active tab
+      if (tabName === 'swap-suggestions' && !document.getElementById('swap-suggestions-list').dataset.loaded) {
+        loadSwapSuggestions();
+      } else if (tabName === 'current-assignments' && !document.getElementById('assignments-list').dataset.loaded) {
+        loadCurrentAssignments();
+      }
+    }
+
+    // Load overview statistics
+    async function loadStats() {
+      try {
+        const response = await fetch('/api/routing/optimization-summary');
+        const data = await response.json();
+        
+        document.getElementById('total-assignments').textContent = data.total_assignments || 0;
+        document.getElementById('avg-fit-score').textContent = 
+          data.average_fit_score ? (data.average_fit_score * 100).toFixed(1) + '%' : 'N/A';
+        document.getElementById('swap-opportunities').textContent = data.swap_opportunities || 0;
+        document.getElementById('low-fit-count').textContent = data.low_fit_assignments || 0;
+      } catch (error) {
+        console.error('Failed to load stats:', error);
+      }
+    }
+
+    // Load swap suggestions
+    async function loadSwapSuggestions() {
+      const container = document.getElementById('swap-suggestions-list');
+      container.innerHTML = '<div class="loading">Loading swap suggestions...</div>';
+
+      try {
+        const response = await fetch('/api/routing/swap-suggestions?top_k=10');
+        const data = await response.json();
+
+        if (data.suggestions && data.suggestions.length > 0) {
+          container.innerHTML = data.suggestions.map(suggestion => `
+            <div class="suggestion">
+              <div class="suggestion-header">
+                <strong>Swap Suggestion</strong>
+                <span class="improvement-badge">+${suggestion.swap_analysis.improvement_percentage.toFixed(1)}%</span>
+              </div>
+              <div class="volunteer-swap">
+                <div class="volunteer-info">
+                  <div class="volunteer-name">${suggestion.volunteer_1.name}</div>
+                  <div class="project-name">Currently: ${suggestion.volunteer_1.current_project_name}</div>
+                  <div class="project-name" style="color: var(--success); font-weight: 500;">
+                    Proposed: ${suggestion.volunteer_1.proposed_project_name}
+                  </div>
+                </div>
+                <div class="swap-arrow">⇄</div>
+                <div class="volunteer-info">
+                  <div class="volunteer-name">${suggestion.volunteer_2.name}</div>
+                  <div class="project-name">Currently: ${suggestion.volunteer_2.current_project_name}</div>
+                  <div class="project-name" style="color: var(--success); font-weight: 500;">
+                    Proposed: ${suggestion.volunteer_2.proposed_project_name}
+                  </div>
+                </div>
+              </div>
+              <div class="reasons">
+                ${suggestion.swap_analysis.reasons.map(reason => `
+                  <div class="reason">${reason}</div>
+                `).join('')}
+              </div>
+            </div>
+          `).join('');
+        } else {
+          container.innerHTML = '<div class="empty-state">No swap suggestions available at this time.</div>';
+        }
+        
+        container.dataset.loaded = 'true';
+      } catch (error) {
+        console.error('Failed to load swap suggestions:', error);
+        container.innerHTML = '<div class="error">Failed to load swap suggestions. Please try again.</div>';
+      }
+    }
+
+    // Load current assignments
+    async function loadCurrentAssignments() {
+      const container = document.getElementById('assignments-list');
+      container.innerHTML = '<div class="loading">Loading current assignments...</div>';
+
+      try {
+        const response = await fetch('/api/routing/current-assignments');
+        const data = await response.json();
+
+        if (data.assignments && data.assignments.length > 0) {
+          container.innerHTML = data.assignments.map(assignment => `
+            <div class="assignment ${assignment.fit_category.toLowerCase()}">
+              <div>
+                <strong>${assignment.volunteer_name}</strong>
+                <br>
+                <span style="color: var(--muted); font-size: 14px;">${assignment.project_name}</span>
+                <br>
+                <span style="color: var(--muted); font-size: 12px;">${assignment.branch} Branch</span>
+              </div>
+              <div>
+                <span class="fit-score ${assignment.fit_category.toLowerCase()}">
+                  ${(assignment.fit_score * 100).toFixed(0)}% Fit
+                </span>
+              </div>
+            </div>
+          `).join('');
+          
+          // Add summary
+          const stats = data.statistics;
+          container.innerHTML += `
+            <div style="margin-top: 20px; padding: 16px; background: #f9fafb; border-radius: 8px;">
+              <strong>Assignment Summary:</strong><br>
+              High Fit (70%+): ${stats.high_fit_count} assignments<br>
+              Medium Fit (40-69%): ${stats.medium_fit_count} assignments<br>
+              Low Fit (<40%): ${stats.low_fit_count} assignments
+            </div>
+          `;
+        } else {
+          container.innerHTML = '<div class="empty-state">No current assignments found.</div>';
+        }
+        
+        container.dataset.loaded = 'true';
+      } catch (error) {
+        console.error('Failed to load current assignments:', error);
+        container.innerHTML = '<div class="error">Failed to load current assignments. Please try again.</div>';
+      }
+    }
+
+    // Analyze branch coverage
+    async function analyzeBranch() {
+      const branchSelect = document.getElementById('branch-select');
+      const branchName = branchSelect.value;
+      const container = document.getElementById('branch-analysis');
+
+      if (!branchName) {
+        container.innerHTML = '<div class="empty-state">Please select a branch to analyze.</div>';
+        return;
+      }
+
+      container.innerHTML = '<div class="loading">Analyzing branch coverage...</div>';
+
+      try {
+        const response = await fetch(`/api/routing/branch-coverage/${encodeURIComponent(branchName)}`);
+        const data = await response.json();
+
+        if (response.ok) {
+          container.innerHTML = `
+            <div class="card" style="margin: 0;">
+              <h4>${data.branch} Branch Analysis</h4>
+              <div class="grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));">
+                <div class="stat">
+                  <div class="stat-value">${data.total_projects}</div>
+                  <div class="stat-label">Total Projects</div>
+                </div>
+                <div class="stat">
+                  <div class="stat-value">${data.current_assignments}</div>
+                  <div class="stat-label">Current Assignments</div>
+                </div>
+                <div class="stat">
+                  <div class="stat-value">${(data.coverage_ratio * 100).toFixed(1)}%</div>
+                  <div class="stat-label">Coverage Ratio</div>
+                </div>
+                <div class="stat">
+                  <div class="stat-value">${data.recommendations.length}</div>
+                  <div class="stat-label">Recommendations</div>
+                </div>
+              </div>
+              ${data.recommendations.length > 0 ? `
+                <h5 style="margin-top: 20px;">Recommendations:</h5>
+                ${data.recommendations.map(rec => `
+                  <div class="assignment" style="margin-bottom: 8px;">
+                    <div>
+                      <strong>${rec.volunteer_name}</strong> → <strong>${rec.project_name}</strong>
+                      <br>
+                      <span style="color: var(--muted); font-size: 14px;">${rec.reason}</span>
+                    </div>
+                    <div>
+                      <span class="fit-score high">${(rec.compatibility_score * 100).toFixed(0)}% Match</span>
+                    </div>
+                  </div>
+                `).join('')}
+              ` : '<p style="color: var(--muted);">No specific recommendations at this time.</p>'}
+            </div>
+          `;
+        } else {
+          container.innerHTML = `<div class="error">${data.detail || 'Failed to analyze branch coverage.'}</div>`;
+        }
+      } catch (error) {
+        console.error('Failed to analyze branch coverage:', error);
+        container.innerHTML = '<div class="error">Failed to analyze branch coverage. Please try again.</div>';
+      }
+    }
+
+    // Refresh all data
+    function refreshData() {
+      loadStats();
+      
+      // Clear loaded flags and reload active tab
+      document.getElementById('swap-suggestions-list').dataset.loaded = '';
+      document.getElementById('assignments-list').dataset.loaded = '';
+      
+      const activeTab = document.querySelector('.tab.active').onclick.toString().match(/switchTab\('([^']+)'/)[1];
+      if (activeTab === 'swap-suggestions') {
+        loadSwapSuggestions();
+      } else if (activeTab === 'current-assignments') {
+        loadCurrentAssignments();
+      }
+    }
+
+    // Initialize page
+    document.addEventListener('DOMContentLoaded', function() {
+      loadStats();
+      loadSwapSuggestions(); // Load default tab
+    });
+  </script>
+</body>
+</html>

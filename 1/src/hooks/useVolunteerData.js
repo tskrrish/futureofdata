@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { toMonth } from "../utils/dateUtils";
+import { generateBranchForecast, generateOrganizationForecast } from "../utils/forecastUtils";
 
 export function useVolunteerData(raw, branchFilter, search, monthFilter = "All") {
   const branches = useMemo(() => {
@@ -316,6 +317,22 @@ export function useVolunteerData(raw, branchFilter, search, monthFilter = "All")
     ydeImpactPct: totalHours > 0 ? ((ydeStats.reduce((acc, stat) => acc + stat.hours, 0) / totalHours) * 100).toFixed(1) : 0
   }), [filtered, activeVolunteersCount, totalHours, memberVolunteersCount, projectCategoryStats, ydeStats]);
 
+  // FORECAST DATA (Per-Branch Monthly Hours Prediction with Confidence Bands)
+  const branchForecasts = useMemo(() => {
+    return generateBranchForecast(filtered, 6);
+  }, [filtered]);
+
+  const organizationForecast = useMemo(() => {
+    return generateOrganizationForecast(filtered, 6);
+  }, [filtered]);
+
+  // Current branch forecast (filtered by selected branch)
+  const currentBranchForecast = useMemo(() => {
+    if (branchFilter === "All") return organizationForecast;
+    const branchData = branchForecasts.find(forecast => forecast.branch === branchFilter);
+    return branchData ? branchData.forecasts : [];
+  }, [branchForecasts, branchFilter, organizationForecast]);
+
   return {
     branches,
     months,
@@ -333,6 +350,9 @@ export function useVolunteerData(raw, branchFilter, search, monthFilter = "All")
     ydeStats,
     seniorCentersStats,
     insights,
-    enhancedKPIs
+    enhancedKPIs,
+    branchForecasts,
+    organizationForecast,
+    currentBranchForecast
   };
 }
