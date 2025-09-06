@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 class VolunteerDatabase:
     def __init__(self):
         """Initialize Supabase clients with proper error handling"""
+        self.audit_logger = None  # Will be set after initialization
         try:
             if not settings.SUPABASE_URL or not settings.SUPABASE_KEY:
                 logger.warning("Supabase credentials not configured. Database features will be disabled.")
@@ -294,6 +295,10 @@ class VolunteerDatabase:
         
         print("✅ Database schema ready! Run SQL commands in Supabase dashboard.")
     
+    def set_audit_logger(self, audit_logger):
+        """Set the audit logger instance"""
+        self.audit_logger = audit_logger
+    
     # User Management
     async def create_user(self, user_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Create a new user"""
@@ -309,8 +314,25 @@ class VolunteerDatabase:
             response = self.supabase.table('users').insert(user_data).execute()
             
             if response.data and len(response.data) > 0:
+                created_user = response.data[0]
                 logger.info(f"✅ Created user: {user_data.get('email', 'unknown')}")
-                return response.data[0]
+                
+                # Log audit entry
+                if self.audit_logger:
+                    try:
+                        from audit_logger import AuditAction, AuditResource
+                        await self.audit_logger.log_audit_entry(
+                            action=AuditAction.CREATE,
+                            resource=AuditResource.USER,
+                            user_id=created_user.get('id'),
+                            resource_id=created_user.get('id'),
+                            new_values=user_data,
+                            metadata={'operation': 'create_user'}
+                        )
+                    except Exception as audit_error:
+                        logger.error(f"❌ Error logging audit entry: {audit_error}")
+                
+                return created_user
             else:
                 logger.error(f"Failed to create user: {response}")
                 return None

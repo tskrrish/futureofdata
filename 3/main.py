@@ -21,7 +21,6 @@ from ai_assistant import VolunteerAIAssistant
 from matching_engine import VolunteerMatchingEngine
 from data_processor import VolunteerDataProcessor
 from database import VolunteerDatabase
-from auth import SSOAuth, get_current_user_optional, get_current_user_required
 
 
 # Initialize FastAPI app
@@ -82,6 +81,7 @@ class FeedbackData(BaseModel):
     rating: Optional[int] = None
     feedback_text: str = ""
     feedback_type: str = "general"
+
 
 
 # Initialize data on startup
