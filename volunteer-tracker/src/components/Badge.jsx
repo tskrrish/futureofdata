@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion } from 'framer-motion'
 import { makeRng } from '../utils/seeded.js'
+import { getTierData, getStoryworldChipClass, MILESTONES } from '../constants.js'
 
 function hashStringToNumber(input) {
   let hash = 0
@@ -11,25 +12,7 @@ function hashStringToNumber(input) {
   return Math.abs(hash)
 }
 
-function getTierData(hours) {
-  if (hours >= 500) return { name: 'GUIDING LIGHT', rating: 99, color: '#FF6B35', bgPattern: 'icon', rarity: 'legendary' }
-  if (hours >= 100) return { name: 'PASSION IN ACTION', rating: 89, color: '#1B1B1B', bgPattern: 'totw', rarity: 'special' }
-  if (hours >= 50) return { name: 'COMMITMENT CHAMPION', rating: 84, color: '#FFD700', bgPattern: 'gold', rarity: 'rare' }
-  if (hours >= 25) return { name: 'SERVICE STAR', rating: 74, color: '#C0C0C0', bgPattern: 'silver', rarity: 'uncommon' }
-  if (hours >= 10) return { name: 'FIRST IMPACT', rating: 64, color: '#CD7F32', bgPattern: 'bronze', rarity: 'common' }
-  return { name: 'VOLUNTEER', rating: 45, color: '#8B4513', bgPattern: 'basic', rarity: 'basic' }
-}
 
-function getMilestoneData(milestone) {
-  const milestoneDetails = {
-    "First Impact": { description: "Your journey begins", reward: "Digital Badge" },
-    "Service Star": { description: "Making a difference", reward: "Digital Badge" },
-    "Commitment Champion": { description: "Dedicated to service", reward: "Digital Badge" },
-    "Passion In Action Award": { description: "100+ hours of impact", reward: "YMCA T-Shirt" },
-    "Guiding Light Award": { description: "500+ hours of leadership", reward: "Engraved Glass Star" }
-  };
-  return milestoneDetails[milestone] || { description: "Achievement unlocked", reward: "Recognition" };
-}
 
 export default function Badge({ volunteer }) {
   const fullName = `${volunteer.first_name} ${volunteer.last_name}`
@@ -66,7 +49,7 @@ export default function Badge({ volunteer }) {
 
   return (
     <motion.div 
-      className={`fut-card fut-card-${tierData.bgPattern} ${tierData.rarity}`} 
+      className={`fut-card fut-card-${tierData.bgPattern} ${tierData.rarity}` 
       role="img" 
       aria-label="Volunteer card"
       initial={{ 
@@ -148,11 +131,9 @@ export default function Badge({ volunteer }) {
 
           {/* Custom Stamps */}
           <div className="stamps-row">
-            {renderStamp('First Impact', hours >= 10)}
-            {renderStamp('Service Star', hours >= 25)}
-            {renderStamp('Commitment Champion', hours >= 50)}
-            {renderStamp('Passion In Action Award', hours >= 100)}
-            {renderStamp('Guiding Light Award', hours >= 500)}
+            {MILESTONES.map(milestone => 
+              renderStamp(milestone.label, hours >= milestone.threshold)
+            )}
           </div>
         </div>
 
@@ -161,7 +142,7 @@ export default function Badge({ volunteer }) {
           <div className="story-title">Your Storyworlds</div>
           <div className="storyworld-chips">
             {(volunteer.storyworlds || []).map((sw, i) => (
-              <div key={i} className={`story-chip ${chipClassForStoryworld(sw)}`}>{sw}</div>
+              <div key={i} className={`story-chip ${getStoryworldChipClass(sw)}`}>{sw}</div>
             ))}
           </div>
           <div className="story-subtitle">Projects</div>
@@ -182,15 +163,6 @@ export default function Badge({ volunteer }) {
   )
 }
 
-function chipClassForStoryworld(name) {
-  const n = (name || '').toLowerCase()
-  if (n.includes('youth')) return 'sw-yellow'
-  if (n.includes('healthy')) return 'sw-red'
-  if (n.includes('water')) return 'sw-blue'
-  if (n.includes('neighbor')) return 'sw-green'
-  if (n.includes('sports')) return 'sw-orange'
-  return 'sw-neutral'
-}
 
 function renderStamp(label, achieved) {
   return (

@@ -3,8 +3,8 @@
 import pandas as pd
 from typing import Dict, Tuple
 
-EXCEL_PATH = "/Users/joshuajerin/Desktop/jarvis/futureofdata/Y Volunteer Raw Data - Jan- August 2025.xlsx"
-OUTPUT_CSV_PATH = "/Users/joshuajerin/Desktop/jarvis/futureofdata/volunteer_fulfilled_total_hours.csv"
+EXCEL_PATH = "Y Volunteer Raw Data - Jan- August 2025.xlsx"
+OUTPUT_CSV_PATH = "volunteer_fulfilled_total_hours.csv"
 
 
 def normalize_whitespace(value: str) -> str:

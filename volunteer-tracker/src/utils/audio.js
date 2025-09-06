@@ -1,3 +1,5 @@
+import { AUDIO_CONFIG } from '../constants.js'
+
 let ctx
 function getCtx() {
   if (ctx) return ctx
@@ -39,17 +41,7 @@ export function playFanfare(tier = 'basic') {
   const c = getCtx()
   const now = c.currentTime
   
-  // Tier-specific fanfare patterns
-  const patterns = {
-    legendary: [523.25, 659.25, 783.99, 1046.50, 1318.51], // C5, E5, G5, C6, E6
-    special: [440, 554.37, 659.25, 880, 1108.73], // A4, C#5, E5, A5, C#6
-    rare: [392, 493.88, 587.33, 784], // G4, B4, D5, G5
-    uncommon: [349.23, 440, 523.25, 698.46], // F4, A4, C5, F5
-    common: [293.66, 369.99, 440, 587.33], // D4, F#4, A4, D5
-    basic: [261.63, 329.63, 392, 523.25] // C4, E4, G4, C5
-  }
-  
-  const notes = patterns[tier] || patterns.basic
+  const notes = AUDIO_CONFIG.fanfare[tier] || AUDIO_CONFIG.fanfare.basic
   const duration = tier === 'legendary' ? 2.5 : tier === 'special' ? 2 : 1.5
   
   notes.forEach((freq, i) => {
@@ -73,17 +65,7 @@ export function playAmbientTone(tier = 'basic', duration = 3000) {
   const c = getCtx()
   const now = c.currentTime
   
-  // Tier-specific ambient frequencies
-  const ambientFreqs = {
-    legendary: [220, 330, 440, 660], // Rich harmonics
-    special: [196, 294, 392], // Purple vibes
-    rare: [174.61, 261.63], // Gold warmth
-    uncommon: [146.83, 220], // Silver clarity
-    common: [130.81, 196], // Bronze earthiness
-    basic: [110, 165] // Basic foundation
-  }
-  
-  const freqs = ambientFreqs[tier] || ambientFreqs.basic
+  const freqs = AUDIO_CONFIG.ambient[tier] || AUDIO_CONFIG.ambient.basic
   
   freqs.forEach((freq, i) => {
     const osc = c.createOscillator()
