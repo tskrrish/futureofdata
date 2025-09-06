@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from typing import Dict, List, Optional, Any
 import uvicorn
 import asyncio
+import logging
 from datetime import datetime
 import os
 import pandas as pd
@@ -20,6 +21,10 @@ from ai_assistant import VolunteerAIAssistant
 from matching_engine import VolunteerMatchingEngine
 from data_processor import VolunteerDataProcessor
 from database import VolunteerDatabase
+from salesforce_service import salesforce_service
+
+# Initialize logging
+logger = logging.getLogger(__name__)
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -110,6 +115,22 @@ async def startup_event():
             print(f"⚠️  Volunteer data file not found: {settings.VOLUNTEER_DATA_PATH}")
     except Exception as e:
         print(f"❌ Error loading volunteer data: {e}")
+    
+    # Test Salesforce connection if enabled
+    if salesforce_service.is_enabled():
+        try:
+            connection_test = await salesforce_service.test_connection()
+            if connection_test.get("connected"):
+                print("✅ Salesforce connection verified")
+                # Trigger background sync if needed
+                if volunteer_data:
+                    await salesforce_service.trigger_background_sync(volunteer_data)
+            else:
+                print(f"⚠️  Salesforce connection failed: {connection_test.get('error', 'Unknown error')}")
+        except Exception as e:
+            print(f"⚠️  Salesforce setup error: {e}")
+    else:
+        print("ℹ️  Salesforce sync is disabled")
     
     print("🎉 Volunteer PathFinder AI Assistant is ready!")
 
@@ -677,6 +698,71 @@ async def get_resources() -> JSONResponse:
     }
     
     return JSONResponse(content=resources)
+
+# Salesforce Integration Endpoints
+
+@app.get("/api/salesforce/status")
+async def get_salesforce_status() -> JSONResponse:
+    """Get Salesforce integration status"""
+    try:
+        status = await salesforce_service.get_sync_status()
+        return JSONResponse(content=status)
+    except Exception as e:
+        logger.error(f"Failed to get Salesforce status: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get Salesforce status")
+
+@app.post("/api/salesforce/test-connection")
+async def test_salesforce_connection() -> JSONResponse:
+    """Test Salesforce connection"""
+    try:
+        result = await salesforce_service.test_connection()
+        return JSONResponse(content=result)
+    except Exception as e:
+        logger.error(f"Salesforce connection test failed: {e}")
+        raise HTTPException(status_code=500, detail="Connection test failed")
+
+@app.post("/api/salesforce/sync")
+async def trigger_salesforce_sync() -> JSONResponse:
+    """Trigger full Salesforce sync"""
+    if not salesforce_service.is_enabled():
+        raise HTTPException(status_code=503, detail="Salesforce sync is not enabled")
+    
+    if not volunteer_data:
+        raise HTTPException(status_code=400, detail="No volunteer data available to sync")
+    
+    try:
+        result = await salesforce_service.sync_volunteer_data(volunteer_data)
+        return JSONResponse(content=result)
+    except Exception as e:
+        logger.error(f"Salesforce sync failed: {e}")
+        raise HTTPException(status_code=500, detail="Sync failed")
+
+@app.post("/api/salesforce/sync-volunteer")
+async def sync_volunteer_to_salesforce(volunteer_data: UserProfile) -> JSONResponse:
+    """Sync a single volunteer to Salesforce"""
+    if not salesforce_service.is_enabled():
+        raise HTTPException(status_code=503, detail="Salesforce sync is not enabled")
+    
+    try:
+        volunteer_dict = volunteer_data.dict(exclude_unset=True)
+        result = await salesforce_service.sync_single_volunteer(volunteer_dict)
+        return JSONResponse(content=result)
+    except Exception as e:
+        logger.error(f"Failed to sync volunteer to Salesforce: {e}")
+        raise HTTPException(status_code=500, detail="Failed to sync volunteer")
+
+@app.get("/api/salesforce/data-summary")
+async def get_salesforce_data_summary() -> JSONResponse:
+    """Get summary of data in Salesforce"""
+    if not salesforce_service.is_enabled():
+        raise HTTPException(status_code=503, detail="Salesforce sync is not enabled")
+    
+    try:
+        result = await salesforce_service.get_salesforce_data_summary()
+        return JSONResponse(content=result)
+    except Exception as e:
+        logger.error(f"Failed to get Salesforce data summary: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get data summary")
 
 # Main web interface
 @app.get("/", response_class=HTMLResponse)
