@@ -64,8 +64,10 @@ class UserPreferences(BaseModel):
     availability: Dict[str, Any] = {}
     time_commitment: int = 2  # 1=low, 2=medium, 3=high
     location_preference: str = ""
+    user_location: Optional[str] = None  # For proximity matching
     experience_level: int = 1  # 1=beginner, 2=some, 3=experienced
     volunteer_type: str = ""
+    transportation: Dict[str, Any] = {}  # Transportation preferences
 
 class ChatMessage(BaseModel):
     message: str
@@ -392,6 +394,55 @@ async def chat_with_assistant(
         print(f"❌ Chat error: {e}")
         raise HTTPException(status_code=500, detail="Chat service temporarily unavailable")
 
+# Location analysis
+@app.post("/api/location-analysis")
+async def analyze_location(
+    location_data: Dict[str, Any],
+    background_tasks: BackgroundTasks = None
+) -> JSONResponse:
+    """Analyze location accessibility and travel options for volunteering"""
+    
+    if not matching_engine:
+        raise HTTPException(status_code=503, detail="Matching service not available")
+    
+    user_location = location_data.get('user_location')
+    if not user_location:
+        raise HTTPException(status_code=400, detail="User location is required")
+    
+    try:
+        user_preferences = location_data.get('preferences', {})
+        
+        # Get comprehensive location analysis
+        location_analysis = matching_engine.get_location_analysis(
+            user_location, user_preferences
+        )
+        
+        # Get accessibility report
+        accessibility_report = matching_engine.proximity_matcher.get_branch_accessibility_report()
+        
+        result = {
+            "location_analysis": location_analysis,
+            "accessibility_report": accessibility_report,
+            "generated_at": datetime.now().isoformat()
+        }
+        
+        # Track analytics
+        if background_tasks:
+            background_tasks.add_task(
+                database.track_event,
+                "location_analysis",
+                {
+                    "user_location": user_location,
+                    "has_transport_prefs": bool(user_preferences.get('transportation'))
+                }
+            )
+        
+        return JSONResponse(content=result)
+        
+    except Exception as e:
+        print(f"❌ Location analysis error: {e}")
+        raise HTTPException(status_code=500, detail="Location analysis service temporarily unavailable")
+
 # Volunteer matching
 @app.post("/api/match")
 async def get_volunteer_matches(
@@ -414,14 +465,27 @@ async def get_volunteer_matches(
             volunteer_data
         )
         
-        # Get ML-based matches
-        ml_matches = matching_engine.find_matches(preferences_dict, top_k=5)
+        # Get ML-based matches with proximity enhancement if location provided
+        user_location = preferences_dict.get('user_location')
+        if user_location:
+            ml_matches = matching_engine.find_proximity_matches(
+                preferences_dict, user_location, top_k=5
+            )
+        else:
+            ml_matches = matching_engine.find_matches(preferences_dict, top_k=5)
         
         # Get success prediction
         success_prediction = matching_engine.predict_volunteer_success(preferences_dict)
         
-        # Get branch recommendations
+        # Get branch recommendations (enhanced with proximity if location provided)
         branch_recommendations = matching_engine.get_branch_recommendations(preferences_dict)
+        
+        # Add proximity analysis if user location provided
+        location_analysis = None
+        if user_location:
+            location_analysis = matching_engine.get_location_analysis(
+                user_location, preferences_dict
+            )
         
         # Combine results
         result = {
@@ -429,7 +493,9 @@ async def get_volunteer_matches(
             "ml_matches": ml_matches,
             "success_prediction": success_prediction,
             "branch_recommendations": branch_recommendations,
+            "location_analysis": location_analysis,
             "insights": volunteer_data.get('insights', {}),
+            "proximity_enabled": user_location is not None,
             "generated_at": datetime.now().isoformat()
         }
         
@@ -455,7 +521,9 @@ async def get_volunteer_matches(
             {
                 "preferences": preferences_dict,
                 "matches_count": len(ml_matches),
-                "top_match_score": ml_matches[0]['score'] if ml_matches else 0
+                "top_match_score": ml_matches[0]['score'] if ml_matches else 0,
+                "proximity_enabled": user_location is not None,
+                "user_location": user_location if user_location else None
             },
             user_id
         )
