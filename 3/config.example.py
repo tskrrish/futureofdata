@@ -44,4 +44,10 @@ class Settings:
     XERO_REDIRECT_URI: str = os.getenv('XERO_REDIRECT_URI', 'http://localhost:8000/api/integration/xero/callback')
     XERO_DEFAULT_EXPENSE_ACCOUNT: str = os.getenv('XERO_DEFAULT_EXPENSE_ACCOUNT', '400')
 
+    # Twilio SMS Configuration
+    TWILIO_ACCOUNT_SID: str = os.getenv('TWILIO_ACCOUNT_SID', '')
+    TWILIO_AUTH_TOKEN: str = os.getenv('TWILIO_AUTH_TOKEN', '')
+    TWILIO_PHONE_NUMBER: str = os.getenv('TWILIO_PHONE_NUMBER', '')
+    SMS_WEBHOOK_URL: str = os.getenv('SMS_WEBHOOK_URL', 'http://localhost:8000/webhooks/sms')
+
 settings = Settings()

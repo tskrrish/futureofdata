@@ -24,15 +24,6 @@ from ai_assistant import VolunteerAIAssistant
 from matching_engine import VolunteerMatchingEngine
 from data_processor import VolunteerDataProcessor
 from database import VolunteerDatabase
-from email_sms_drafting import (
-    EmailSMSDraftingEngine, MessageType, MessageTone, OutreachPurpose, 
-    PersonalizationContext, MessageContext, DraftedMessage
-)
-from contextual_tone_analyzer import (
-    ContextualToneAnalyzer, ToneAnalysis, EngagementPattern, 
-    CommunicationStyle, ResponsivenessLevel
-)
-from message_templates import MessageTemplateEngine
 
 
 # Initialize FastAPI app
@@ -54,10 +45,6 @@ app.add_middleware(
 
 # Global instances
 ai_assistant = VolunteerAIAssistant()
-database = VolunteerDatabase()
-
-volunteer_data = None
-matching_engine = None
 
 
 # Pydantic models
@@ -93,8 +80,6 @@ class FeedbackData(BaseModel):
     rating: Optional[int] = None
     feedback_text: str = ""
     feedback_type: str = "general"
-
-
 
 # Initialize data on startup
 @app.on_event("startup")
@@ -1106,14 +1091,7 @@ async def get_resources() -> JSONResponse:
             "Youth Development": "Mentoring, after-school programs, summer camps",
             "Fitness & Wellness": "Group exercise, swimming instruction, sports coaching",
             "Special Events": "Fundraisers, community celebrations, holiday programs",
-            "Facility Support": "Maintenance, organization, member services",
-            "Administrative": "Office support, data entry, communications"
-        }
-    }
-    
-    return JSONResponse(content=resources)
-
-
+            "Facility Suppor
 
 # Main web interface
 @app.get("/", response_class=HTMLResponse)
