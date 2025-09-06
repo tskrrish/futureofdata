@@ -12,6 +12,7 @@ import { KPI } from "./components/ui/KPI";
 import { OverviewTab } from "./components/tabs/OverviewTab";
 import { BranchesTab } from "./components/tabs/BranchesTab";
 import { PeopleTab } from "./components/tabs/PeopleTab";
+import { FairLeaderboardsTab } from "./components/tabs/FairLeaderboardsTab";
 import { PassportTab } from "./components/tabs/PassportTab";
 
 export default function App() {
@@ -31,7 +32,9 @@ export default function App() {
     memberShareByBranch,
     trendByMonth,
     leaderboard,
-    badges
+    badges,
+    normalizedLeaderboards,
+    leaderboardInsights
   } = useVolunteerData(raw, branchFilter, search);
 
   const handleFile = useFileUpload(setRaw);
@@ -79,6 +82,7 @@ export default function App() {
             ["overview", "Overview"],
             ["branches", "Branch Breakdown"],
             ["people", "People & Badges"],
+            ["fair-leaderboards", "Fair Leaderboards"],
             ["passport", "Belonging Passport"],
           ].map(([id, label]) => (
             <button
@@ -110,6 +114,15 @@ export default function App() {
 
         {tab === "people" && (
           <PeopleTab leaderboard={leaderboard} badges={badges} />
+        )}
+
+        {tab === "fair-leaderboards" && (
+          <FairLeaderboardsTab 
+            normalizedLeaderboards={normalizedLeaderboards}
+            leaderboardInsights={leaderboardInsights}
+            leaderboard={leaderboard}
+            badges={badges}
+          />
         )}
 
         {tab === "passport" && <PassportTab />}

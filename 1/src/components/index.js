@@ -10,4 +10,5 @@ export { MemberShareChart } from "./charts/MemberShareChart";
 export { OverviewTab } from "./tabs/OverviewTab";
 export { BranchesTab } from "./tabs/BranchesTab";
 export { PeopleTab } from "./tabs/PeopleTab";
+export { FairLeaderboardsTab } from "./tabs/FairLeaderboardsTab";
 export { PassportTab } from "./tabs/PassportTab";

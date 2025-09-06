@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { toMonth } from "../utils/dateUtils";
+import { calculateNormalizedLeaderboards, getLeaderboardInsights } from "../utils/leaderboardUtils";
 
 export function useVolunteerData(raw, branchFilter, search, monthFilter = "All") {
   const branches = useMemo(() => {
@@ -239,6 +240,15 @@ export function useVolunteerData(raw, branchFilter, search, monthFilter = "All")
       .slice(0, 15);
   }, [filtered]);
 
+  // Enhanced normalized leaderboards for fair competition
+  const normalizedLeaderboards = useMemo(() => {
+    return calculateNormalizedLeaderboards(filtered);
+  }, [filtered]);
+
+  const leaderboardInsights = useMemo(() => {
+    return getLeaderboardInsights(normalizedLeaderboards);
+  }, [normalizedLeaderboards]);
+
   const badges = useMemo(() => {
     const milestones = [10, 25, 50, 100, 200, 500];
     const sums = new Map();
@@ -333,6 +343,8 @@ export function useVolunteerData(raw, branchFilter, search, monthFilter = "All")
     ydeStats,
     seniorCentersStats,
     insights,
-    enhancedKPIs
+    enhancedKPIs,
+    normalizedLeaderboards,
+    leaderboardInsights
   };
 }
