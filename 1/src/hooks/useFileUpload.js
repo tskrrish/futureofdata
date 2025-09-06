@@ -1,52 +1,51 @@
-import Papa from "papaparse";
+import { SmartImporter } from '../utils/smartImporter.js';
 
 export function useFileUpload(setRaw) {
-  function handleFile(e) {
+  async function handleFile(e) {
     const file = e.target.files?.[0];
     if (!file) return;
-    const isCSV = file.name.toLowerCase().endsWith(".csv");
-    const isJSON = file.name.toLowerCase().endsWith(".json");
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        if (isCSV) {
-          const res = Papa.parse(reader.result, { header: true, skipEmptyLines: true });
-          const rows = (res.data || [])
-            .map(r => ({
-              // Core volunteer info
-              branch: String(r.branch ?? r.BRANCH ?? r.Branch ?? "").trim(),
-              hours: Number(r.hours ?? r.HOURS ?? r.Hrs ?? 0) || 0,
-              assignee: String(r.assignee ?? r.ASSIGNEE ?? r.Name ?? r.ASSIGNEE ?? "").trim(),
-              date: r.date ? String(r.date) : (r.Date ? String(r.Date) : undefined),
-              
-              // Member information
-              is_member: String(r.is_member ?? r.member ?? r.Member ?? r["ARE YOU A YMCA MEMBER"] ?? "")
-                .toLowerCase().startsWith("y"),
-              member_branch: String(r.member_branch ?? r["MEMBER BRANCH"] ?? r.MemberBranch ?? "").trim(),
-              
-              // Project information
-              project_tag: String(r.project_tag ?? r["PROJECT TAG"] ?? r.ProjectTag ?? "").trim(),
-              project_catalog: String(r.project_catalog ?? r["PROJECT CATALOG"] ?? r.ProjectCatalog ?? "").trim(),
-              project: String(r.project ?? r.PROJECT ?? r.Project ?? "").trim(),
-              
-              // Additional fields
-              category: String(r.category ?? r.Category ?? "").trim(),
-              department: String(r.department ?? r.Department ?? "").trim(),
-            }))
-            .filter(r => r.hours > 0); // Automatically remove 0-hour entries
-          setRaw(rows);
-        } else if (isJSON) {
-          const parsed = JSON.parse(reader.result);
-          setRaw(parsed);
-        } else {
-          alert("Please upload a CSV or JSON file.");
+    
+    try {
+      const importer = new SmartImporter({
+        autoMapHeaders: true,
+        normalizeData: true,
+        validateData: true,
+        skipEmptyRows: true,
+        requireMandatoryFields: false // Allow flexible imports
+      });
+      
+      const result = await importer.importFile(file);
+      
+      // Filter out zero-hour entries to match existing behavior
+      const filteredData = result.data.filter(row => row.hours && row.hours > 0);
+      
+      // Show import statistics to user
+      const stats = importer.getImportStats();
+      if (stats && (stats.errorCount > 0 || stats.warningCount > 0)) {
+        const messages = [];
+        if (stats.errorCount > 0) {
+          messages.push(`${stats.errorCount} errors`);
         }
-      } catch (err) {
-        console.error(err);
-        alert("Could not parse the file. Expected columns: branch, hours, assignee, is_member, date");
+        if (stats.warningCount > 0) {
+          messages.push(`${stats.warningCount} warnings`);
+        }
+        if (stats.skippedRows > 0) {
+          messages.push(`${stats.skippedRows} rows skipped`);
+        }
+        
+        const message = `Import completed with ${messages.join(', ')}.\nProcessed ${stats.validRows} valid rows out of ${stats.totalRows} total.`;
+        console.log('Import details:', result);
+        alert(message);
+      } else {
+        console.log(`Successfully imported ${filteredData.length} volunteer records`);
       }
-    };
-    reader.readAsText(file);
+      
+      setRaw(filteredData);
+      
+    } catch (err) {
+      console.error('Import error:', err);
+      alert(`Import failed: ${err.message}\n\nPlease ensure your file contains the required columns: branch, hours, assignee, date`);
+    }
   }
 
   return handleFile;
