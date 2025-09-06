@@ -2,7 +2,7 @@
 Main FastAPI application for Volunteer PathFinder AI Assistant
 Brings together AI, matching engine, and database
 """
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
@@ -20,6 +20,13 @@ from ai_assistant import VolunteerAIAssistant
 from matching_engine import VolunteerMatchingEngine
 from data_processor import VolunteerDataProcessor
 from database import VolunteerDatabase
+from pii_redaction import (
+    pii_engine, 
+    pii_middleware, 
+    get_user_context_from_request, 
+    UserContext, 
+    ViewPermissionLevel
+)
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -192,7 +199,7 @@ def _derive_preferences_from_history(history_df: pd.DataFrame) -> dict:
     return preferences
 
 @app.post("/api/profile")
-async def get_profile_analysis(req: ProfileRequest) -> JSONResponse:
+async def get_profile_analysis(req: ProfileRequest, request: Request) -> JSONResponse:
     """Analyze a volunteer's profile by their name from the Excel dataset and suggest matches."""
     if volunteer_data is None:
         raise HTTPException(status_code=503, detail="Volunteer data not loaded")
@@ -342,12 +349,28 @@ async def get_profile_analysis(req: ProfileRequest) -> JSONResponse:
         "recommendations": recs,
         "summary": "\n".join(summary_lines)
     }
-    # Save context for subsequent AI chats
+    # Apply PII redaction based on user context
+    try:
+        user_context = get_user_context_from_request(request)
+        # Apply PII masking to the profile payload
+        masked_payload = pii_engine.mask_volunteer_profile(
+            profile_payload, 
+            user_context, 
+            target_user_id=str(contact_id)
+        )
+    except Exception as e:
+        print(f"⚠️ PII redaction error: {e}")
+        # Fall back to basic public masking
+        user_context = UserContext(permission_level=ViewPermissionLevel.PUBLIC)
+        masked_payload = pii_engine.mask_data(profile_payload, user_context)
+    
+    # Save context for subsequent AI chats (use original unmasked data)
     try:
         ai_assistant.add_context("profile", profile_payload)
     except Exception:
         pass
-    return JSONResponse(content=profile_payload)
+    
+    return JSONResponse(content=masked_payload)
 
 # Main chat interface
 @app.post("/api/chat")
@@ -491,7 +514,7 @@ async def create_user(user_data: UserProfile) -> JSONResponse:
         raise HTTPException(status_code=500, detail="User creation failed")
 
 @app.get("/api/users/{user_id}")
-async def get_user(user_id: str) -> JSONResponse:
+async def get_user(user_id: str, request: Request) -> JSONResponse:
     """Get user profile"""
     
     try:
@@ -504,12 +527,28 @@ async def get_user(user_id: str) -> JSONResponse:
             # Get user matches
             matches = await database.get_user_matches(user_id)
             
-            return JSONResponse(content={
+            response_data = {
                 "user": user,
                 "preferences": preferences,
                 "matches": matches,
                 "success": True
-            })
+            }
+            
+            # Apply PII redaction based on user context
+            try:
+                user_context = get_user_context_from_request(request)
+                masked_response = pii_engine.mask_volunteer_profile(
+                    response_data, 
+                    user_context, 
+                    target_user_id=user_id
+                )
+            except Exception as e:
+                print(f"⚠️ PII redaction error: {e}")
+                # Fall back to basic public masking
+                user_context = UserContext(permission_level=ViewPermissionLevel.PUBLIC)
+                masked_response = pii_engine.mask_data(response_data, user_context)
+            
+            return JSONResponse(content=masked_response)
         else:
             raise HTTPException(status_code=404, detail="User not found")
             
