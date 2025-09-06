@@ -3,6 +3,7 @@ import confetti from 'canvas-confetti';
 import { playCheer, playDrumroll, playFanfare, playAmbientTone, playCardFlip, playMagicalSparkle } from './utils/audio.js';
 import Badge from './components/Badge.jsx';
 import CelebrationOverlay from './components/CelebrationOverlay.jsx';
+import GiftCardStore from './components/GiftCardStore.jsx';
 import { getTierForHours, MILESTONES } from './constants.js';
 
 function App() {
@@ -12,6 +13,7 @@ function App() {
   const firedRef = useRef(false);
   const [showOverlay, setShowOverlay] = useState(false);
   const [hideSearchBar, setHideSearchBar] = useState(false);
+  const [showGiftCardStore, setShowGiftCardStore] = useState(false);
 
   function runFullScreenConfetti(hours) {
     const duration = Math.min(9000, 4000 + hours * 40);
@@ -107,7 +109,9 @@ function App() {
 
       {/* Main Card Display Area */}
       <div className="card-stage">
-        {volunteerData ? (
+        {showGiftCardStore ? (
+          <GiftCardStore volunteer={volunteerData} />
+        ) : volunteerData ? (
           <div className="full-card-display">
             <Badge volunteer={volunteerData} />
           </div>
@@ -157,6 +161,17 @@ function App() {
           {error && <div className="search-error">{error}</div>}
         </div>
       </div>
+
+      {/* Gift Card Store Toggle Button */}
+      {volunteerData && (
+        <button 
+          className="store-toggle"
+          onClick={() => setShowGiftCardStore(!showGiftCardStore)}
+          title={showGiftCardStore ? "Back to Card" : "Open Reward Store"}
+        >
+          {showGiftCardStore ? '👤' : '🎁'}
+        </button>
+      )}
 
       <CelebrationOverlay 
         show={showOverlay} 
