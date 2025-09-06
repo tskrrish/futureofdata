@@ -23,6 +23,9 @@ class VolunteerAggregate(BaseModel):
     first_activity: Optional[str]
     last_activity: Optional[str]
     milestones: List[str]
+    projects: List[str]
+    storyworlds: List[str]
+    branches: List[str]
 
 
 MILESTONES = [
@@ -32,6 +35,14 @@ MILESTONES = [
     (100, "Passion In Action Award"),
     (500, "Guiding Light Award"),
 ]
+
+MILESTONE_DETAILS = {
+    "First Impact": {"description": "Your journey begins", "reward": "Digital Badge"},
+    "Service Star": {"description": "Making a difference", "reward": "Digital Badge"},
+    "Commitment Champion": {"description": "Dedicated to service", "reward": "Digital Badge"},
+    "Passion In Action Award": {"description": "100+ hours of impact", "reward": "YMCA T-Shirt"},
+    "Guiding Light Award": {"description": "500+ hours of leadership", "reward": "Engraved Glass Star"},
+}
 
 
 def load_dataframe(csv_path: Path) -> pd.DataFrame:
@@ -45,14 +56,19 @@ def load_dataframe(csv_path: Path) -> pd.DataFrame:
         "Last Name",
         "Email",
         "Contact ID",
-        "Hours",
+        "Pledged",
+        "Fulfilled",
+        "Project",
+        "Project Tags",
+        "Branch",
     }
     missing = expected_columns - set(df.columns)
     if missing:
         raise ValueError(f"CSV missing required columns: {sorted(missing)}")
     # Types
     df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
-    df["Hours"] = pd.to_numeric(df["Hours"], errors="coerce").fillna(0.0)
+    df["Pledged"] = pd.to_numeric(df["Pledged"], errors="coerce").fillna(0.0)
+    df["Fulfilled"] = pd.to_numeric(df["Fulfilled"], errors="coerce").fillna(0)
     # Clean names and ids
     if "Contact ID" in df:
         df["Contact ID"] = pd.to_numeric(df["Contact ID"], errors="coerce").astype("Int64")
@@ -61,6 +77,10 @@ def load_dataframe(csv_path: Path) -> pd.DataFrame:
     df["Last Name"] = df["Last Name"].fillna("").astype(str).str.strip()
     if "Email" in df:
         df["Email"] = df["Email"].fillna("").astype(str).str.strip().str.lower()
+    # Clean project and branch data
+    df["Project"] = df["Project"].fillna("").astype(str).str.strip()
+    df["Project Tags"] = df["Project Tags"].fillna("").astype(str).str.strip()
+    df["Branch"] = df["Branch"].fillna("").astype(str).str.strip()
     return df
 
 
@@ -87,10 +107,39 @@ def compute_milestones(total_hours: float) -> List[str]:
 
 
 def aggregate_by_volunteer(df: pd.DataFrame) -> List[VolunteerAggregate]:
-    grouped = df.groupby(["Contact ID", "First Name", "Last Name", "Email"], dropna=False)
+    # Filter to only fulfilled entries
+    fulfilled_df = df[df["Fulfilled"] == 1].copy()
+    
+    def map_row_to_storyworlds(row: pd.Series) -> List[str]:
+        tags = (row.get("Project Tags") or "").lower()
+        project = (row.get("Project") or "").lower()
+        candidates = f"{tags} {project}"
+        storyworlds: List[str] = []
+        # Youth Spark
+        if any(k in candidates for k in ["youth", "teen", "after-school", "after school", "camp", "child", "mentor", "education"]):
+            storyworlds.append("Youth Spark")
+        # Healthy Together
+        if any(k in candidates for k in ["healthy", "wellness", "group ex", "fitness", "health"]):
+            storyworlds.append("Healthy Together")
+        # Water & Wellness
+        if any(k in candidates for k in ["aquatics", "swim", "water", "lifeguard", "aerobics"]):
+            storyworlds.append("Water & Wellness")
+        # Neighbor Power
+        if any(k in candidates for k in ["community", "garden", "pantry", "outreach", "good neighbor", "bookshelf", "care team", "welcome desk", "branch support"]):
+            storyworlds.append("Neighbor Power")
+        # Sports
+        if any(k in candidates for k in ["sports", "basketball", "soccer", "coach", "referee", "flag football", "youth coaching"]):
+            storyworlds.append("Sports")
+        # Fallbacks based on Branch Support if no match
+        if not storyworlds and "branch support" in candidates:
+            storyworlds.append("Neighbor Power")
+        return list(dict.fromkeys(storyworlds))  # de-dup preserving order
+
+    grouped = fulfilled_df.groupby(["Contact ID", "First Name", "Last Name", "Email"], dropna=False)
     results: List[VolunteerAggregate] = []
     for (contact_id, first_name, last_name, email), g in grouped:
-        hours_total = float(g["Hours"].sum())
+        # Sum up pledged hours for this volunteer
+        hours_total = float(g["Pledged"].sum())
         first_activity = None
         last_activity = None
         if not g["Date"].isna().all():
@@ -98,6 +147,15 @@ def aggregate_by_volunteer(df: pd.DataFrame) -> List[VolunteerAggregate]:
             last_dt = g["Date"].max()
             first_activity = first_dt.strftime("%Y-%m-%d") if pd.notna(first_dt) else None
             last_activity = last_dt.strftime("%Y-%m-%d") if pd.notna(last_dt) else None
+
+        # Collect projects, branches, and storyworlds
+        projects = sorted(set([p for p in g.get("Project", []).astype(str).tolist() if p]))
+        branches = sorted(set([b for b in g.get("Branch", []).astype(str).tolist() if b]))
+        storyworlds_set: List[str] = []
+        for _, row in g.iterrows():
+            for sw in map_row_to_storyworlds(row):
+                if sw not in storyworlds_set:
+                    storyworlds_set.append(sw)
 
         results.append(
             VolunteerAggregate(
@@ -110,6 +168,9 @@ def aggregate_by_volunteer(df: pd.DataFrame) -> List[VolunteerAggregate]:
                 first_activity=first_activity,
                 last_activity=last_activity,
                 milestones=compute_milestones(hours_total),
+                projects=projects[:6],
+                storyworlds=storyworlds_set[:5],
+                branches=branches[:5],
             )
         )
     # Sort by total hours desc
