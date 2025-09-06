@@ -2,7 +2,7 @@
 Main FastAPI application for Volunteer PathFinder AI Assistant
 Brings together AI, matching engine, and database
 """
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
@@ -13,6 +13,9 @@ import asyncio
 from datetime import datetime
 import os
 import pandas as pd
+import uuid
+import logging
+from dataclasses import asdict
 
 # Import our modules
 from config import settings
@@ -23,6 +26,7 @@ from database import VolunteerDatabase
 from rbac_api import create_rbac_router
 from rbac_middleware import create_rbac_middleware
 from rbac_models import RBACService
+
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -44,6 +48,8 @@ app.add_middleware(
 # Global instances
 ai_assistant = VolunteerAIAssistant()
 database = VolunteerDatabase()
+retention_manager = None
+retention_scheduler = None
 volunteer_data = None
 matching_engine = None
 rbac_middleware = None
@@ -84,11 +90,12 @@ class FeedbackData(BaseModel):
     feedback_text: str = ""
     feedback_type: str = "general"
 
+
 # Initialize data on startup
 @app.on_event("startup")
 async def startup_event():
     """Initialize application data and models"""
-    global volunteer_data, matching_engine, rbac_middleware, rbac_dependency, rbac_service
+
     
     print("🚀 Starting Volunteer PathFinder AI Assistant...")
     
@@ -99,17 +106,7 @@ async def startup_event():
     except Exception as e:
         print(f"⚠️  Database initialization note: {e}")
     
-    # Initialize RBAC system
-    try:
-        rbac_middleware, rbac_dependency = create_rbac_middleware(database)
-        rbac_service = RBACService(database)
-        
-        # Bootstrap system roles if needed
-        await rbac_service.bootstrap_system_roles()
-        
-        print("✅ RBAC system initialized")
-    except Exception as e:
-        print(f"⚠️  RBAC initialization error: {e}")
+
     
     # Load and process volunteer data
     try:
@@ -171,6 +168,14 @@ async def chat_page():
         return FileResponse(file_path)
     return HTMLResponse("<h3>Chat UI not found. Create static/chat.html</h3>", status_code=404)
 
+# Serve templates UI
+@app.get("/templates", response_class=HTMLResponse)
+async def templates_page():
+    file_path = os.path.join(os.path.dirname(__file__), "static", "templates.html")
+    if os.path.exists(file_path):
+        return FileResponse(file_path)
+    return HTMLResponse("<h3>Templates UI not found.</h3>", status_code=404)
+
 class ProfileRequest(BaseModel):
     name: str
 
@@ -218,7 +223,7 @@ def _derive_preferences_from_history(history_df: pd.DataFrame) -> dict:
     return preferences
 
 @app.post("/api/profile")
-async def get_profile_analysis(req: ProfileRequest) -> JSONResponse:
+async def get_profile_analysis(req: ProfileRequest, request: Request) -> JSONResponse:
     """Analyze a volunteer's profile by their name from the Excel dataset and suggest matches."""
     if volunteer_data is None:
         raise HTTPException(status_code=503, detail="Volunteer data not loaded")
@@ -368,12 +373,28 @@ async def get_profile_analysis(req: ProfileRequest) -> JSONResponse:
         "recommendations": recs,
         "summary": "\n".join(summary_lines)
     }
-    # Save context for subsequent AI chats
+    # Apply PII redaction based on user context
+    try:
+        user_context = get_user_context_from_request(request)
+        # Apply PII masking to the profile payload
+        masked_payload = pii_engine.mask_volunteer_profile(
+            profile_payload, 
+            user_context, 
+            target_user_id=str(contact_id)
+        )
+    except Exception as e:
+        print(f"⚠️ PII redaction error: {e}")
+        # Fall back to basic public masking
+        user_context = UserContext(permission_level=ViewPermissionLevel.PUBLIC)
+        masked_payload = pii_engine.mask_data(profile_payload, user_context)
+    
+    # Save context for subsequent AI chats (use original unmasked data)
     try:
         ai_assistant.add_context("profile", profile_payload)
     except Exception:
         pass
-    return JSONResponse(content=profile_payload)
+    
+    return JSONResponse(content=masked_payload)
 
 # Main chat interface
 @app.post("/api/chat")
@@ -517,7 +538,7 @@ async def create_user(user_data: UserProfile) -> JSONResponse:
         raise HTTPException(status_code=500, detail="User creation failed")
 
 @app.get("/api/users/{user_id}")
-async def get_user(user_id: str) -> JSONResponse:
+async def get_user(user_id: str, request: Request) -> JSONResponse:
     """Get user profile"""
     
     try:
@@ -530,12 +551,28 @@ async def get_user(user_id: str) -> JSONResponse:
             # Get user matches
             matches = await database.get_user_matches(user_id)
             
-            return JSONResponse(content={
+            response_data = {
                 "user": user,
                 "preferences": preferences,
                 "matches": matches,
                 "success": True
-            })
+            }
+            
+            # Apply PII redaction based on user context
+            try:
+                user_context = get_user_context_from_request(request)
+                masked_response = pii_engine.mask_volunteer_profile(
+                    response_data, 
+                    user_context, 
+                    target_user_id=user_id
+                )
+            except Exception as e:
+                print(f"⚠️ PII redaction error: {e}")
+                # Fall back to basic public masking
+                user_context = UserContext(permission_level=ViewPermissionLevel.PUBLIC)
+                masked_response = pii_engine.mask_data(response_data, user_context)
+            
+            return JSONResponse(content=masked_response)
         else:
             raise HTTPException(status_code=404, detail="User not found")
             
@@ -704,6 +741,7 @@ async def get_resources() -> JSONResponse:
     
     return JSONResponse(content=resources)
 
+
 # Main web interface
 @app.get("/", response_class=HTMLResponse)
 async def main_interface():
@@ -742,6 +780,7 @@ async def main_interface():
           <h1>YMCA Volunteer PathFinder</h1>
           <p class=\"lead\">An AI assistant that helps you explore, understand, and navigate YMCA volunteer opportunities.</p>
           <a class=\"cta\" href=\"/chat\">Start Chat</a>
+          <a class=\"cta\" href=\"/templates\" style=\"background:#38a169;margin-left:10px\">📧 Message Templates</a>
         </section>
 
         <section class=\"section\">
