@@ -2,7 +2,7 @@
 Main FastAPI application for Volunteer PathFinder AI Assistant
 Brings together AI, matching engine, and database
 """
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
@@ -14,13 +14,14 @@ from datetime import datetime
 import os
 import pandas as pd
 
+
 # Import our modules
 from config import settings
 from ai_assistant import VolunteerAIAssistant
 from matching_engine import VolunteerMatchingEngine
 from data_processor import VolunteerDataProcessor
 from database import VolunteerDatabase
-from audit_logger import AuditLogger, AuditAction, AuditResource
+
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -42,10 +43,10 @@ app.add_middleware(
 # Global instances
 ai_assistant = VolunteerAIAssistant()
 database = VolunteerDatabase()
-audit_logger = AuditLogger(database)
-database.set_audit_logger(audit_logger)
+
 volunteer_data = None
 matching_engine = None
+
 
 # Pydantic models
 class UserProfile(BaseModel):
@@ -81,28 +82,13 @@ class FeedbackData(BaseModel):
     feedback_text: str = ""
     feedback_type: str = "general"
 
-class AuditLogFilter(BaseModel):
-    user_id: Optional[str] = None
-    resource: Optional[str] = None
-    resource_id: Optional[str] = None
-    action: Optional[str] = None
-    start_date: Optional[str] = None
-    end_date: Optional[str] = None
-    limit: Optional[int] = 100
-    offset: Optional[int] = 0
 
-class AuditExportRequest(BaseModel):
-    format_type: str = "csv"  # csv, json, excel
-    user_id: Optional[str] = None
-    resource: Optional[str] = None
-    start_date: Optional[str] = None
-    end_date: Optional[str] = None
 
 # Initialize data on startup
 @app.on_event("startup")
 async def startup_event():
     """Initialize application data and models"""
-    global volunteer_data, matching_engine
+
     
     print("🚀 Starting Volunteer PathFinder AI Assistant...")
     
@@ -113,6 +99,7 @@ async def startup_event():
     except Exception as e:
         print(f"⚠️  Database initialization note: {e}")
     
+
     # Load and process volunteer data
     try:
         if os.path.exists(settings.VOLUNTEER_DATA_PATH):
@@ -132,6 +119,14 @@ async def startup_event():
         print(f"❌ Error loading volunteer data: {e}")
     
     print("🎉 Volunteer PathFinder AI Assistant is ready!")
+    
+    # Include RBAC router
+    try:
+        rbac_router = create_rbac_router(database)
+        app.include_router(rbac_router)
+        print("✅ RBAC API endpoints registered")
+    except Exception as e:
+        print(f"⚠️  RBAC router error: {e}")
 
 @app.post("/api/reset")
 async def reset_context() -> JSONResponse:
@@ -153,9 +148,110 @@ async def health_check():
         "models_ready": matching_engine is not None and matching_engine.models_trained
     }
 
+# SSO Authentication Routes
+@app.get("/auth/google")
+async def google_login():
+    """Initiate Google OAuth login"""
+    auth_url = sso_auth.get_google_auth_url()
+    return {"auth_url": auth_url}
+
+@app.get("/auth/microsoft")
+async def microsoft_login():
+    """Initiate Microsoft OAuth login"""
+    auth_url = sso_auth.get_microsoft_auth_url()
+    return {"auth_url": auth_url}
+
+@app.get("/auth/callback/google")
+async def google_callback(request: Request):
+    """Handle Google OAuth callback"""
+    try:
+        result = await sso_auth.handle_google_callback(request)
+        # Return HTML page that handles the token storage and redirect
+        return HTMLResponse(f"""
+        <!doctype html>
+        <html>
+        <head><title>Authentication Complete</title></head>
+        <body>
+          <script>
+            localStorage.setItem('auth_token', '{result["access_token"]}');
+            localStorage.setItem('user', '{json.dumps(result["user"])}');
+            localStorage.setItem('auth_provider', '{result["provider"]}');
+            window.location.href = '/chat';
+          </script>
+        </body>
+        </html>
+        """)
+    except HTTPException as e:
+        return HTMLResponse(f"""
+        <!doctype html>
+        <html>
+        <head><title>Authentication Error</title></head>
+        <body>
+          <script>
+            alert('Authentication failed: {e.detail}');
+            window.location.href = '/login';
+          </script>
+        </body>
+        </html>
+        """, status_code=e.status_code)
+
+@app.get("/auth/callback/microsoft")
+async def microsoft_callback(request: Request):
+    """Handle Microsoft OAuth callback"""
+    try:
+        result = await sso_auth.handle_microsoft_callback(request)
+        # Return HTML page that handles the token storage and redirect
+        return HTMLResponse(f"""
+        <!doctype html>
+        <html>
+        <head><title>Authentication Complete</title></head>
+        <body>
+          <script>
+            localStorage.setItem('auth_token', '{result["access_token"]}');
+            localStorage.setItem('user', '{json.dumps(result["user"])}');
+            localStorage.setItem('auth_provider', '{result["provider"]}');
+            window.location.href = '/chat';
+          </script>
+        </body>
+        </html>
+        """)
+    except HTTPException as e:
+        return HTMLResponse(f"""
+        <!doctype html>
+        <html>
+        <head><title>Authentication Error</title></head>
+        <body>
+          <script>
+            alert('Authentication failed: {e.detail}');
+            window.location.href = '/login';
+          </script>
+        </body>
+        </html>
+        """, status_code=e.status_code)
+
+@app.get("/auth/me")
+async def get_current_user_info(user = Depends(lambda: get_current_user_optional(database))):
+    """Get current user information"""
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return {"user": user}
+
+@app.post("/auth/logout")
+async def logout():
+    """Logout endpoint (client-side token removal)"""
+    return {"message": "Logged out successfully", "note": "Remove token from client storage"}
+
 # Serve static files (for web interface)
 if os.path.exists("static"):
     app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# Serve login page
+@app.get("/login", response_class=HTMLResponse)
+async def login_page():
+    file_path = os.path.join(os.path.dirname(__file__), "static", "login.html")
+    if os.path.exists(file_path):
+        return FileResponse(file_path)
+    return HTMLResponse("<h3>Login page not found</h3>", status_code=404)
 
 # Serve chat UI directly
 @app.get("/chat", response_class=HTMLResponse)
@@ -164,6 +260,14 @@ async def chat_page():
     if os.path.exists(file_path):
         return FileResponse(file_path)
     return HTMLResponse("<h3>Chat UI not found. Create static/chat.html</h3>", status_code=404)
+
+# Serve templates UI
+@app.get("/templates", response_class=HTMLResponse)
+async def templates_page():
+    file_path = os.path.join(os.path.dirname(__file__), "static", "templates.html")
+    if os.path.exists(file_path):
+        return FileResponse(file_path)
+    return HTMLResponse("<h3>Templates UI not found.</h3>", status_code=404)
 
 class ProfileRequest(BaseModel):
     name: str
@@ -212,7 +316,7 @@ def _derive_preferences_from_history(history_df: pd.DataFrame) -> dict:
     return preferences
 
 @app.post("/api/profile")
-async def get_profile_analysis(req: ProfileRequest) -> JSONResponse:
+async def get_profile_analysis(req: ProfileRequest, request: Request) -> JSONResponse:
     """Analyze a volunteer's profile by their name from the Excel dataset and suggest matches."""
     if volunteer_data is None:
         raise HTTPException(status_code=503, detail="Volunteer data not loaded")
@@ -362,18 +466,35 @@ async def get_profile_analysis(req: ProfileRequest) -> JSONResponse:
         "recommendations": recs,
         "summary": "\n".join(summary_lines)
     }
-    # Save context for subsequent AI chats
+    # Apply PII redaction based on user context
+    try:
+        user_context = get_user_context_from_request(request)
+        # Apply PII masking to the profile payload
+        masked_payload = pii_engine.mask_volunteer_profile(
+            profile_payload, 
+            user_context, 
+            target_user_id=str(contact_id)
+        )
+    except Exception as e:
+        print(f"⚠️ PII redaction error: {e}")
+        # Fall back to basic public masking
+        user_context = UserContext(permission_level=ViewPermissionLevel.PUBLIC)
+        masked_payload = pii_engine.mask_data(profile_payload, user_context)
+    
+    # Save context for subsequent AI chats (use original unmasked data)
     try:
         ai_assistant.add_context("profile", profile_payload)
     except Exception:
         pass
-    return JSONResponse(content=profile_payload)
+    
+    return JSONResponse(content=masked_payload)
 
 # Main chat interface
 @app.post("/api/chat")
 async def chat_with_assistant(
     chat_data: ChatMessage,
-    background_tasks: BackgroundTasks
+    background_tasks: BackgroundTasks,
+    current_user = Depends(lambda: get_current_user_optional(database))
 ) -> JSONResponse:
     """Main chat endpoint for the AI assistant"""
     
@@ -384,6 +505,9 @@ async def chat_with_assistant(
             conversation_id=chat_data.conversation_id
         )
         
+        # Use current user ID if available
+        user_id = current_user['id'] if current_user else chat_data.user_id
+        
         # Save to database in background
         if chat_data.conversation_id:
             background_tasks.add_task(
@@ -391,7 +515,7 @@ async def chat_with_assistant(
                 chat_data.conversation_id,
                 chat_data.message,
                 response.get('response', ''),
-                chat_data.user_id
+                user_id
             )
         
         # Track analytics
@@ -402,7 +526,7 @@ async def chat_with_assistant(
                 "message_length": len(chat_data.message),
                 "response_success": response.get('success', False)
             },
-            chat_data.user_id,
+            user_id,
             chat_data.conversation_id
         )
         
@@ -416,8 +540,9 @@ async def chat_with_assistant(
 @app.post("/api/match")
 async def get_volunteer_matches(
     preferences: UserPreferences,
-    user_id: Optional[str] = None,
-    background_tasks: BackgroundTasks = None
+    background_tasks: BackgroundTasks,
+    current_user = Depends(lambda: get_current_user_optional(database)),
+    user_id: Optional[str] = None
 ) -> JSONResponse:
     """Get personalized volunteer recommendations"""
     
@@ -453,18 +578,21 @@ async def get_volunteer_matches(
             "generated_at": datetime.now().isoformat()
         }
         
+        # Use current user ID if available, otherwise fallback to provided user_id
+        effective_user_id = current_user['id'] if current_user else user_id
+        
         # Save matches to database
-        if user_id:
+        if effective_user_id:
             background_tasks.add_task(
                 database.save_volunteer_matches,
-                user_id,
+                effective_user_id,
                 ml_matches
             )
             
             # Save preferences
             background_tasks.add_task(
                 database.save_user_preferences,
-                user_id,
+                effective_user_id,
                 preferences_dict
             )
         
@@ -477,7 +605,7 @@ async def get_volunteer_matches(
                 "matches_count": len(ml_matches),
                 "top_match_score": ml_matches[0]['score'] if ml_matches else 0
             },
-            user_id
+            effective_user_id
         )
         
         return JSONResponse(content=result)
@@ -511,7 +639,7 @@ async def create_user(user_data: UserProfile) -> JSONResponse:
         raise HTTPException(status_code=500, detail="User creation failed")
 
 @app.get("/api/users/{user_id}")
-async def get_user(user_id: str) -> JSONResponse:
+async def get_user(user_id: str, request: Request) -> JSONResponse:
     """Get user profile"""
     
     try:
@@ -524,12 +652,28 @@ async def get_user(user_id: str) -> JSONResponse:
             # Get user matches
             matches = await database.get_user_matches(user_id)
             
-            return JSONResponse(content={
+            response_data = {
                 "user": user,
                 "preferences": preferences,
                 "matches": matches,
                 "success": True
-            })
+            }
+            
+            # Apply PII redaction based on user context
+            try:
+                user_context = get_user_context_from_request(request)
+                masked_response = pii_engine.mask_volunteer_profile(
+                    response_data, 
+                    user_context, 
+                    target_user_id=user_id
+                )
+            except Exception as e:
+                print(f"⚠️ PII redaction error: {e}")
+                # Fall back to basic public masking
+                user_context = UserContext(permission_level=ViewPermissionLevel.PUBLIC)
+                masked_response = pii_engine.mask_data(response_data, user_context)
+            
+            return JSONResponse(content=masked_response)
         else:
             raise HTTPException(status_code=404, detail="User not found")
             
@@ -698,181 +842,7 @@ async def get_resources() -> JSONResponse:
     
     return JSONResponse(content=resources)
 
-# Audit Log Endpoints
-@app.get("/api/audit/logs")
-async def get_audit_logs(
-    user_id: Optional[str] = None,
-    resource: Optional[str] = None,
-    resource_id: Optional[str] = None,
-    action: Optional[str] = None,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    limit: int = 100,
-    offset: int = 0
-) -> JSONResponse:
-    """Get audit logs with filtering options"""
-    
-    try:
-        # Parse dates
-        start_datetime = None
-        end_datetime = None
-        if start_date:
-            start_datetime = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
-        if end_date:
-            end_datetime = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
-        
-        # Parse enums
-        resource_enum = None
-        action_enum = None
-        if resource:
-            try:
-                resource_enum = AuditResource(resource.lower())
-            except ValueError:
-                raise HTTPException(status_code=400, detail=f"Invalid resource: {resource}")
-        if action:
-            try:
-                action_enum = AuditAction(action.lower())
-            except ValueError:
-                raise HTTPException(status_code=400, detail=f"Invalid action: {action}")
-        
-        logs = await audit_logger.get_audit_logs(
-            user_id=user_id,
-            resource=resource_enum,
-            resource_id=resource_id,
-            action=action_enum,
-            start_date=start_datetime,
-            end_date=end_datetime,
-            limit=limit,
-            offset=offset
-        )
-        
-        return JSONResponse(content={
-            "logs": logs,
-            "total_returned": len(logs),
-            "filters": {
-                "user_id": user_id,
-                "resource": resource,
-                "resource_id": resource_id,
-                "action": action,
-                "start_date": start_date,
-                "end_date": end_date,
-                "limit": limit,
-                "offset": offset
-            }
-        })
-        
-    except Exception as e:
-        print(f"❌ Error getting audit logs: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve audit logs")
 
-@app.get("/api/audit/resource/{resource}/{resource_id}")
-async def get_resource_history(resource: str, resource_id: str) -> JSONResponse:
-    """Get complete history of changes for a specific resource"""
-    
-    try:
-        # Parse resource enum
-        try:
-            resource_enum = AuditResource(resource.lower())
-        except ValueError:
-            raise HTTPException(status_code=400, detail=f"Invalid resource: {resource}")
-        
-        history = await audit_logger.get_resource_history(resource_enum, resource_id)
-        
-        return JSONResponse(content={
-            "resource": resource,
-            "resource_id": resource_id,
-            "history": history,
-            "total_changes": len(history)
-        })
-        
-    except Exception as e:
-        print(f"❌ Error getting resource history: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve resource history")
-
-@app.get("/api/audit/user/{user_id}/activity")
-async def get_user_activity(user_id: str, days: int = 30) -> JSONResponse:
-    """Get all audit activity for a specific user"""
-    
-    try:
-        activity = await audit_logger.get_user_activity(user_id, days)
-        
-        return JSONResponse(content={
-            "user_id": user_id,
-            "period_days": days,
-            "activity": activity,
-            "total_activities": len(activity)
-        })
-        
-    except Exception as e:
-        print(f"❌ Error getting user activity: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve user activity")
-
-@app.get("/api/audit/statistics")
-async def get_audit_statistics(days: int = 30) -> JSONResponse:
-    """Get audit log statistics and insights"""
-    
-    try:
-        stats = await audit_logger.get_audit_statistics(days)
-        return JSONResponse(content=stats)
-        
-    except Exception as e:
-        print(f"❌ Error getting audit statistics: {e}")
-        raise HTTPException(status_code=500, detail="Failed to retrieve audit statistics")
-
-@app.post("/api/audit/export")
-async def export_audit_logs(export_request: AuditExportRequest) -> Any:
-    """Export audit logs to various formats"""
-    
-    try:
-        # Parse dates
-        start_datetime = None
-        end_datetime = None
-        if export_request.start_date:
-            start_datetime = datetime.fromisoformat(export_request.start_date.replace('Z', '+00:00'))
-        if export_request.end_date:
-            end_datetime = datetime.fromisoformat(export_request.end_date.replace('Z', '+00:00'))
-        
-        # Parse resource enum
-        resource_enum = None
-        if export_request.resource:
-            try:
-                resource_enum = AuditResource(export_request.resource.lower())
-            except ValueError:
-                raise HTTPException(status_code=400, detail=f"Invalid resource: {export_request.resource}")
-        
-        export_data = await audit_logger.export_audit_logs(
-            format_type=export_request.format_type,
-            user_id=export_request.user_id,
-            resource=resource_enum,
-            start_date=start_datetime,
-            end_date=end_datetime
-        )
-        
-        if export_request.format_type.lower() == "json":
-            return JSONResponse(
-                content={"data": export_data},
-                headers={"Content-Disposition": f"attachment; filename=audit_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"}
-            )
-        elif export_request.format_type.lower() == "csv":
-            from fastapi.responses import Response
-            return Response(
-                content=export_data,
-                media_type="text/csv",
-                headers={"Content-Disposition": f"attachment; filename=audit_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"}
-            )
-        elif export_request.format_type.lower() == "excel":
-            from fastapi.responses import Response
-            return Response(
-                content=export_data,
-                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                headers={"Content-Disposition": f"attachment; filename=audit_logs_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"}
-            )
-        else:
-            raise HTTPException(status_code=400, detail=f"Unsupported export format: {export_request.format_type}")
-        
-    except Exception as e:
-        print(f"❌ Error exporting audit logs: {e}")
-        raise HTTPException(status_code=500, detail="Failed to export audit logs")
 
 # Main web interface
 @app.get("/", response_class=HTMLResponse)
@@ -911,7 +881,7 @@ async def main_interface():
         <section class=\"hero\">
           <h1>YMCA Volunteer PathFinder</h1>
           <p class=\"lead\">An AI assistant that helps you explore, understand, and navigate YMCA volunteer opportunities.</p>
-          <a class=\"cta\" href=\"/chat\">Start Chat</a>
+
         </section>
 
         <section class=\"section\">
@@ -989,6 +959,9 @@ async def save_conversation_message(conversation_id: str, user_message: str,
         await database.save_message(conversation_id, 'assistant', ai_response, user_id)
     except Exception as e:
         print(f"❌ Error saving conversation: {e}")
+
+# Set up reimbursement API endpoints
+setup_reimbursement_api(app, database, reimbursement_manager)
 
 # Run the application
 if __name__ == "__main__":
