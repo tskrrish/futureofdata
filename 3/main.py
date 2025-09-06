@@ -20,6 +20,15 @@ from ai_assistant import VolunteerAIAssistant
 from matching_engine import VolunteerMatchingEngine
 from data_processor import VolunteerDataProcessor
 from database import VolunteerDatabase
+from email_sms_drafting import (
+    EmailSMSDraftingEngine, MessageType, MessageTone, OutreachPurpose, 
+    PersonalizationContext, MessageContext, DraftedMessage
+)
+from contextual_tone_analyzer import (
+    ContextualToneAnalyzer, ToneAnalysis, EngagementPattern, 
+    CommunicationStyle, ResponsivenessLevel
+)
+from message_templates import MessageTemplateEngine
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -43,6 +52,9 @@ ai_assistant = VolunteerAIAssistant()
 database = VolunteerDatabase()
 volunteer_data = None
 matching_engine = None
+drafting_engine = None
+tone_analyzer = None
+template_engine = None
 
 # Pydantic models
 class UserProfile(BaseModel):
@@ -78,11 +90,47 @@ class FeedbackData(BaseModel):
     feedback_text: str = ""
     feedback_type: str = "general"
 
+# Email/SMS Drafting Models
+class MessageDraftRequest(BaseModel):
+    contact_id: Optional[str] = None
+    name: Optional[str] = None
+    purpose: str  # OutreachPurpose enum value
+    message_type: str  # MessageType enum value  
+    tone: Optional[str] = None  # MessageTone enum value, auto-detected if not provided
+    urgency_level: int = 1  # 1=low, 2=medium, 3=high
+    custom_instructions: Optional[str] = None
+    event_details: Optional[Dict[str, Any]] = None
+    volunteer_opportunity: Optional[Dict[str, Any]] = None
+    template_id: Optional[str] = None  # Use specific template if provided
+
+class ToneAnalysisRequest(BaseModel):
+    contact_id: Optional[str] = None
+    name: Optional[str] = None
+    message_purpose: str  # OutreachPurpose enum value
+    interaction_history: Optional[List[Dict]] = None
+
+class MessageVariantsRequest(BaseModel):
+    contact_id: Optional[str] = None
+    name: Optional[str] = None
+    purpose: str  # OutreachPurpose enum value
+    message_type: str  # MessageType enum value
+    num_variants: int = 3
+    custom_instructions: Optional[str] = None
+    event_details: Optional[Dict[str, Any]] = None
+    volunteer_opportunity: Optional[Dict[str, Any]] = None
+
+class TemplateRenderRequest(BaseModel):
+    template_id: str
+    contact_id: Optional[str] = None
+    name: Optional[str] = None
+    custom_variables: Optional[Dict[str, str]] = None
+    context_data: Optional[Dict[str, Any]] = None
+
 # Initialize data on startup
 @app.on_event("startup")
 async def startup_event():
     """Initialize application data and models"""
-    global volunteer_data, matching_engine
+    global volunteer_data, matching_engine, drafting_engine, tone_analyzer, template_engine
     
     print("🚀 Starting Volunteer PathFinder AI Assistant...")
     
@@ -110,6 +158,16 @@ async def startup_event():
             print(f"⚠️  Volunteer data file not found: {settings.VOLUNTEER_DATA_PATH}")
     except Exception as e:
         print(f"❌ Error loading volunteer data: {e}")
+    
+    # Initialize email/SMS drafting components
+    try:
+        print("📝 Initializing email/SMS drafting engine...")
+        drafting_engine = EmailSMSDraftingEngine(ai_assistant)
+        tone_analyzer = ContextualToneAnalyzer()
+        template_engine = MessageTemplateEngine()
+        print("✅ Email/SMS drafting engine initialized")
+    except Exception as e:
+        print(f"❌ Error initializing drafting engine: {e}")
     
     print("🎉 Volunteer PathFinder AI Assistant is ready!")
 
@@ -783,6 +841,364 @@ async def main_interface():
     </body>
     </html>
     """)
+
+# Email/SMS Drafting Endpoints
+
+def _create_personalization_context(contact_id: Optional[str], name: Optional[str]) -> PersonalizationContext:
+    """Create PersonalizationContext from available data"""
+    context = PersonalizationContext()
+    
+    # Use name from request or try to get from profile data
+    if name:
+        context.name = name
+    elif contact_id and volunteer_data:
+        # Try to find person in volunteer data
+        profiles = volunteer_data.get('volunteers')
+        interactions = volunteer_data.get('interactions')
+        
+        if profiles is not None:
+            # Find by contact_id
+            profile_match = profiles[profiles['contact_id'] == contact_id]
+            if not profile_match.empty:
+                profile = profile_match.iloc[0]
+                context.contact_id = contact_id
+                context.name = f"{profile.get('first_name', '')} {profile.get('last_name', '')}".strip()
+                context.age = profile.get('age')
+                context.gender = profile.get('gender')
+                context.is_ymca_member = bool(profile.get('is_ymca_member', False))
+                context.member_branch = profile.get('member_branch')
+                context.engagement_level = profile.get('volunteer_type', 'new')
+        
+        if interactions is not None and contact_id:
+            # Get volunteer history
+            person_interactions = interactions[interactions['contact_id'] == contact_id]
+            if not person_interactions.empty:
+                context.volunteer_history = {
+                    'total_hours': person_interactions['hours'].sum(),
+                    'sessions': len(person_interactions),
+                    'unique_projects': person_interactions['project_id'].nunique(),
+                    'first_date': str(person_interactions['date'].min()),
+                    'last_date': str(person_interactions['date'].max()),
+                    'top_categories': person_interactions['project_category'].value_counts().to_dict()
+                }
+    
+    return context
+
+@app.post("/api/draft-message")
+async def draft_message(request: MessageDraftRequest) -> JSONResponse:
+    """Draft a personalized email or SMS message"""
+    
+    if not drafting_engine:
+        raise HTTPException(status_code=503, detail="Drafting engine not available")
+    
+    try:
+        # Create personalization context
+        person_context = _create_personalization_context(request.contact_id, request.name)
+        
+        # Parse enum values
+        try:
+            purpose = OutreachPurpose(request.purpose)
+            message_type = MessageType(request.message_type)
+            tone = MessageTone(request.tone) if request.tone else None
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=f"Invalid enum value: {e}")
+        
+        # Auto-detect tone if not provided
+        if not tone:
+            tone_analysis = tone_analyzer.analyze_tone(
+                person_context=person_context,
+                message_purpose=purpose,
+                interaction_history=None,  # Could be enhanced to get from DB
+                volunteer_data=volunteer_data
+            )
+            tone = tone_analysis.recommended_tone
+        
+        # Create message context
+        message_context = MessageContext(
+            purpose=purpose,
+            tone=tone,
+            message_type=message_type,
+            urgency_level=request.urgency_level,
+            event_details=request.event_details,
+            volunteer_opportunity=request.volunteer_opportunity,
+            follow_up_context=None
+        )
+        
+        # Use template if specified
+        if request.template_id:
+            if not template_engine:
+                raise HTTPException(status_code=503, detail="Template engine not available")
+            
+            rendered = template_engine.render_template(
+                template_id=request.template_id,
+                person_context=person_context,
+                context_data={
+                    'opportunity': request.volunteer_opportunity,
+                    'event': request.event_details
+                }
+            )
+            
+            drafted_message = DraftedMessage(
+                subject=rendered.get('subject'),
+                content=rendered['content'],
+                message_type=message_type,
+                tone=tone,
+                purpose=purpose,
+                personalization_score=0.8,  # Templates are generally well-personalized
+                estimated_engagement=0.7,
+                character_count=len(rendered['content']),
+                metadata={
+                    'template_used': request.template_id,
+                    'variables_used': rendered.get('variables_used', [])
+                },
+                created_at=datetime.now()
+            )
+        else:
+            # Generate using AI
+            drafted_message = await drafting_engine.draft_message(
+                person_context=person_context,
+                message_context=message_context,
+                custom_instructions=request.custom_instructions
+            )
+        
+        # Convert to response format
+        response_data = {
+            "success": True,
+            "message": {
+                "subject": drafted_message.subject,
+                "content": drafted_message.content,
+                "message_type": drafted_message.message_type.value,
+                "tone": drafted_message.tone.value,
+                "purpose": drafted_message.purpose.value,
+                "character_count": drafted_message.character_count,
+                "personalization_score": drafted_message.personalization_score,
+                "estimated_engagement": drafted_message.estimated_engagement,
+                "created_at": drafted_message.created_at.isoformat(),
+                "metadata": drafted_message.metadata
+            },
+            "context_used": {
+                "has_name": bool(person_context.name),
+                "has_volunteer_history": bool(person_context.volunteer_history),
+                "has_branch_info": bool(person_context.member_branch),
+                "engagement_level": person_context.engagement_level
+            },
+            "optimal_send_time": drafting_engine.get_optimal_send_time(
+                person_context, message_type
+            ) if drafting_engine else None
+        }
+        
+        return JSONResponse(content=response_data)
+        
+    except Exception as e:
+        print(f"❌ Message drafting error: {e}")
+        raise HTTPException(status_code=500, detail=f"Message drafting failed: {str(e)}")
+
+@app.post("/api/analyze-tone")
+async def analyze_tone(request: ToneAnalysisRequest) -> JSONResponse:
+    """Analyze optimal tone for a message based on user context"""
+    
+    if not tone_analyzer:
+        raise HTTPException(status_code=503, detail="Tone analyzer not available")
+    
+    try:
+        # Create personalization context
+        person_context = _create_personalization_context(request.contact_id, request.name)
+        
+        # Parse purpose
+        try:
+            purpose = OutreachPurpose(request.message_purpose)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=f"Invalid purpose: {e}")
+        
+        # Perform tone analysis
+        analysis = tone_analyzer.analyze_tone(
+            person_context=person_context,
+            message_purpose=purpose,
+            interaction_history=request.interaction_history,
+            volunteer_data=volunteer_data
+        )
+        
+        response_data = {
+            "success": True,
+            "analysis": {
+                "recommended_tone": analysis.recommended_tone.value,
+                "communication_style": analysis.communication_style.value,
+                "engagement_pattern": analysis.engagement_pattern.value,
+                "responsiveness_level": analysis.responsiveness_level.value,
+                "confidence_score": analysis.confidence_score,
+                "reasoning": analysis.reasoning,
+                "alternative_tones": [tone.value for tone in analysis.alternative_tones],
+                "personalization_opportunities": analysis.personalization_opportunities,
+                "risk_factors": analysis.risk_factors,
+                "optimal_message_length": analysis.optimal_message_length,
+                "emoji_recommendation": analysis.emoji_recommendation
+            }
+        }
+        
+        return JSONResponse(content=response_data)
+        
+    except Exception as e:
+        print(f"❌ Tone analysis error: {e}")
+        raise HTTPException(status_code=500, detail=f"Tone analysis failed: {str(e)}")
+
+@app.post("/api/draft-variants")
+async def draft_message_variants(request: MessageVariantsRequest) -> JSONResponse:
+    """Generate multiple variants of a message for A/B testing"""
+    
+    if not drafting_engine:
+        raise HTTPException(status_code=503, detail="Drafting engine not available")
+    
+    try:
+        # Create personalization context
+        person_context = _create_personalization_context(request.contact_id, request.name)
+        
+        # Parse enum values
+        try:
+            purpose = OutreachPurpose(request.purpose)
+            message_type = MessageType(request.message_type)
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=f"Invalid enum value: {e}")
+        
+        # Create base message context
+        base_context = MessageContext(
+            purpose=purpose,
+            tone=MessageTone.WELCOMING,  # Will be varied
+            message_type=message_type,
+            urgency_level=1,
+            event_details=request.event_details,
+            volunteer_opportunity=request.volunteer_opportunity
+        )
+        
+        # Generate variants
+        variants = await drafting_engine.generate_multiple_variants(
+            person_context=person_context,
+            message_context=base_context,
+            num_variants=min(request.num_variants, 5)  # Limit to 5 variants
+        )
+        
+        # Convert to response format
+        variant_data = []
+        for i, variant in enumerate(variants):
+            variant_data.append({
+                "variant_id": f"variant_{i+1}",
+                "subject": variant.subject,
+                "content": variant.content,
+                "tone": variant.tone.value,
+                "personalization_score": variant.personalization_score,
+                "estimated_engagement": variant.estimated_engagement,
+                "character_count": variant.character_count,
+                "metadata": variant.metadata
+            })
+        
+        response_data = {
+            "success": True,
+            "variants": variant_data,
+            "recommendations": {
+                "best_for_engagement": max(variant_data, key=lambda x: x['estimated_engagement']),
+                "most_personalized": max(variant_data, key=lambda x: x['personalization_score']),
+                "testing_notes": [
+                    "Test variants with different audience segments",
+                    "Monitor open rates and response rates",
+                    "Consider seasonal and timing factors"
+                ]
+            }
+        }
+        
+        return JSONResponse(content=response_data)
+        
+    except Exception as e:
+        print(f"❌ Variant generation error: {e}")
+        raise HTTPException(status_code=500, detail=f"Variant generation failed: {str(e)}")
+
+@app.get("/api/templates")
+async def list_templates(
+    purpose: Optional[str] = None,
+    tone: Optional[str] = None, 
+    message_type: Optional[str] = None
+) -> JSONResponse:
+    """List available message templates with optional filtering"""
+    
+    if not template_engine:
+        raise HTTPException(status_code=503, detail="Template engine not available")
+    
+    try:
+        # Parse filter parameters
+        purpose_filter = OutreachPurpose(purpose) if purpose else None
+        tone_filter = MessageTone(tone) if tone else None
+        type_filter = MessageType(message_type) if message_type else None
+        
+        # Get templates
+        templates = template_engine.get_templates_by_criteria(
+            purpose=purpose_filter,
+            tone=tone_filter,
+            message_type=type_filter
+        )
+        
+        # Convert to response format
+        template_data = []
+        for template in templates:
+            template_data.append({
+                "id": template.id,
+                "name": template.name,
+                "purpose": template.purpose.value,
+                "tone": template.tone.value,
+                "message_type": template.message_type.value,
+                "usage_notes": template.usage_notes,
+                "variables": [
+                    {
+                        "name": var.name,
+                        "description": var.description,
+                        "required": var.required,
+                        "default_value": var.default_value
+                    } for var in template.variables
+                ]
+            })
+        
+        return JSONResponse(content={
+            "success": True,
+            "templates": template_data,
+            "total_count": len(template_data)
+        })
+        
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=f"Invalid filter value: {e}")
+    except Exception as e:
+        print(f"❌ Template listing error: {e}")
+        raise HTTPException(status_code=500, detail=f"Template listing failed: {str(e)}")
+
+@app.post("/api/render-template")
+async def render_template(request: TemplateRenderRequest) -> JSONResponse:
+    """Render a specific template with personalization"""
+    
+    if not template_engine:
+        raise HTTPException(status_code=503, detail="Template engine not available")
+    
+    try:
+        # Create personalization context
+        person_context = _create_personalization_context(request.contact_id, request.name)
+        
+        # Render template
+        rendered = template_engine.render_template(
+            template_id=request.template_id,
+            person_context=person_context,
+            custom_variables=request.custom_variables,
+            context_data=request.context_data or {}
+        )
+        
+        return JSONResponse(content={
+            "success": True,
+            "rendered": rendered,
+            "personalization_context": {
+                "name": person_context.name,
+                "has_volunteer_history": bool(person_context.volunteer_history),
+                "member_branch": person_context.member_branch,
+                "engagement_level": person_context.engagement_level
+            }
+        })
+        
+    except Exception as e:
+        print(f"❌ Template rendering error: {e}")
+        raise HTTPException(status_code=500, detail=f"Template rendering failed: {str(e)}")
 
 # Background task helpers
 async def save_conversation_message(conversation_id: str, user_message: str, 
