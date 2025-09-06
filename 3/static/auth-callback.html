@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Signing In - YMCA Volunteer PathFinder</title>
+  <style>
+    body{margin:0;font-family:ui-sans-serif,system-ui;display:flex;align-items:center;justify-content:center;min-height:100vh;background:#f8fafc}
+    .card{background:white;border-radius:12px;padding:40px;text-align:center;box-shadow:0 4px 12px rgba(0,0,0,0.1);max-width:400px}
+    .spinner{width:32px;height:32px;border:3px solid #e5e7eb;border-top:3px solid #4f46e5;border-radius:50%;animation:spin 1s linear infinite;margin:0 auto 20px}
+    @keyframes spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
+    h2{margin:0 0 12px;color:#111827}
+    p{color:#6b7280;margin:0}
+    .error{color:#dc2626;background:#fef2f2;border:1px solid #fecaca;padding:16px;border-radius:8px;margin-top:20px}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div id="loading">
+      <div class="spinner"></div>
+      <h2>Signing you in...</h2>
+      <p>Please wait while we complete your authentication.</p>
+    </div>
+    
+    <div id="error" style="display:none">
+      <h2>Authentication Error</h2>
+      <div class="error">
+        <p id="error-message">Something went wrong during sign-in.</p>
+      </div>
+      <p style="margin-top:16px">
+        <a href="/login" style="color:#4f46e5">← Try again</a>
+      </p>
+    </div>
+  </div>
+
+  <script>
+    async function handleCallback() {
+      const urlParams = new URLSearchParams(window.location.search);
+      const code = urlParams.get('code');
+      const error = urlParams.get('error');
+      const provider = window.location.pathname.includes('google') ? 'google' : 'microsoft';
+      
+      if (error) {
+        showError('OAuth error: ' + error);
+        return;
+      }
+      
+      if (!code) {
+        showError('No authorization code received');
+        return;
+      }
+      
+      try {
+        const response = await fetch(window.location.pathname, {
+          method: 'GET'
+        });
+        
+        if (!response.ok) {
+          throw new Error('Authentication failed');
+        }
+        
+        const data = await response.json();
+        
+        if (data.access_token) {
+          // Store the JWT token
+          localStorage.setItem('auth_token', data.access_token);
+          localStorage.setItem('user', JSON.stringify(data.user));
+          localStorage.setItem('auth_provider', data.provider);
+          
+          // Redirect to chat
+          window.location.href = '/chat';
+        } else {
+          showError('No access token received');
+        }
+      } catch (error) {
+        showError('Authentication failed: ' + error.message);
+      }
+    }
+    
+    function showError(message) {
+      document.getElementById('loading').style.display = 'none';
+      document.getElementById('error').style.display = 'block';
+      document.getElementById('error-message').textContent = message;
+    }
+    
+    // Start the callback handling
+    handleCallback();
+  </script>
+</body>
+</html>
