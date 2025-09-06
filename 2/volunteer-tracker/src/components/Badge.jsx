@@ -49,7 +49,7 @@ export default function Badge({ volunteer }) {
 
   return (
     <motion.div 
-      className={`fut-card fut-card-${tierData.bgPattern} ${tierData.rarity}` 
+      className={`fut-card fut-card-${tierData.bgPattern} ${tierData.rarity}`}
       role="img" 
       aria-label="Volunteer card"
       initial={{ 

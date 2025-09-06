@@ -4,9 +4,9 @@
 export const MILESTONES = [
   { threshold: 10, label: "First Impact" },
   { threshold: 25, label: "Service Star" },
-  { threshold: 50, label: "Commitment Champion" },
-  { threshold: 100, label: "Passion In Action Award" },
-  { threshold: 500, label: "Guiding Light Award" },
+  { threshold: 50, label: "Commitment Champion", isMajor: true },
+  { threshold: 100, label: "Passion In Action Award", isMajor: true },
+  { threshold: 500, label: "Guiding Light Award", isMajor: true },
 ]
 
 export const MILESTONE_DETAILS = {
@@ -118,6 +118,42 @@ export function computeMilestones(totalHours) {
     .map(m => m.label)
 }
 
+export function detectNewMilestones(previousHours, currentHours) {
+  const previousMilestones = MILESTONES.filter(m => previousHours >= m.threshold)
+  const currentMilestones = MILESTONES.filter(m => currentHours >= m.threshold)
+  
+  return currentMilestones.filter(current => 
+    !previousMilestones.some(prev => prev.threshold === current.threshold)
+  )
+}
+
+export function getMajorMilestones() {
+  return MILESTONES.filter(m => m.isMajor)
+}
+
+export function calculateAnniversaryYears(firstActivityDate) {
+  if (!firstActivityDate) return 0
+  const startDate = new Date(firstActivityDate)
+  const currentDate = new Date()
+  const years = currentDate.getFullYear() - startDate.getFullYear()
+  
+  const hasPassedAnniversary = 
+    currentDate.getMonth() > startDate.getMonth() ||
+    (currentDate.getMonth() === startDate.getMonth() && currentDate.getDate() >= startDate.getDate())
+  
+  return hasPassedAnniversary ? years : years - 1
+}
+
+export function isAnniversaryToday(firstActivityDate) {
+  if (!firstActivityDate) return false
+  const startDate = new Date(firstActivityDate)
+  const today = new Date()
+  
+  return startDate.getMonth() === today.getMonth() && 
+         startDate.getDate() === today.getDate() &&
+         today.getFullYear() > startDate.getFullYear()
+}
+
 export function getStoryworldChipClass(storyworldName) {
   const name = (storyworldName || '').toLowerCase()
   if (name.includes('youth')) return STORYWORLD_COLORS["Youth Spark"]
@@ -126,4 +162,170 @@ export function getStoryworldChipClass(storyworldName) {
   if (name.includes('neighbor')) return STORYWORLD_COLORS["Neighbor Power"]
   if (name.includes('sports')) return STORYWORLD_COLORS["Sports"]
   return 'sw-neutral'
+}
+
+// Quest System Constants
+export const QUEST_TYPES = {
+  HOURS_MILESTONE: 'hours_milestone',
+  TIME_BOUNDED: 'time_bounded',
+  STREAK: 'streak',
+  STORYWORLD_FOCUS: 'storyworld_focus',
+  COMMUNITY_CHALLENGE: 'community_challenge'
+}
+
+export const QUEST_STATUS = {
+  ACTIVE: 'active',
+  COMPLETED: 'completed',
+  EXPIRED: 'expired',
+  LOCKED: 'locked'
+}
+
+export const QUEST_DIFFICULTY = {
+  EASY: 'easy',
+  MEDIUM: 'medium',
+  HARD: 'hard',
+  EPIC: 'epic'
+}
+
+export const QUEST_REWARDS = {
+  POINTS: 'points',
+  BADGE: 'badge',
+  TITLE: 'title',
+  PHYSICAL: 'physical'
+}
+
+// Predefined Quests Configuration
+export const QUESTS_CONFIG = [
+  {
+    id: 'first_steps',
+    title: 'First Steps',
+    description: 'Complete your first 5 volunteer hours',
+    type: QUEST_TYPES.HOURS_MILESTONE,
+    difficulty: QUEST_DIFFICULTY.EASY,
+    target: 5,
+    timeLimit: null,
+    rewards: [
+      { type: QUEST_REWARDS.POINTS, value: 100 },
+      { type: QUEST_REWARDS.BADGE, value: 'First Steps Champion' }
+    ],
+    icon: '👶',
+    unlockCondition: { minHours: 0 }
+  },
+  {
+    id: 'weekend_warrior',
+    title: 'Weekend Warrior',
+    description: 'Volunteer 10 hours over a weekend (Sat-Sun)',
+    type: QUEST_TYPES.TIME_BOUNDED,
+    difficulty: QUEST_DIFFICULTY.MEDIUM,
+    target: 10,
+    timeLimit: 172800000, // 48 hours in ms
+    rewards: [
+      { type: QUEST_REWARDS.POINTS, value: 300 },
+      { type: QUEST_REWARDS.TITLE, value: 'Weekend Warrior' }
+    ],
+    icon: '⚔️',
+    unlockCondition: { minHours: 20 }
+  },
+  {
+    id: 'consistency_king',
+    title: 'Consistency King',
+    description: 'Volunteer at least 2 hours for 7 consecutive days',
+    type: QUEST_TYPES.STREAK,
+    difficulty: QUEST_DIFFICULTY.HARD,
+    target: 7,
+    timeLimit: 604800000, // 7 days in ms
+    rewards: [
+      { type: QUEST_REWARDS.POINTS, value: 500 },
+      { type: QUEST_REWARDS.BADGE, value: 'Consistency Master' },
+      { type: QUEST_REWARDS.TITLE, value: 'The Reliable' }
+    ],
+    icon: '👑',
+    unlockCondition: { minHours: 50 }
+  },
+  {
+    id: 'youth_champion',
+    title: 'Youth Champion',
+    description: 'Complete 25 hours in Youth Spark programs',
+    type: QUEST_TYPES.STORYWORLD_FOCUS,
+    difficulty: QUEST_DIFFICULTY.MEDIUM,
+    target: 25,
+    storyworld: 'Youth Spark',
+    timeLimit: 2592000000, // 30 days in ms
+    rewards: [
+      { type: QUEST_REWARDS.POINTS, value: 400 },
+      { type: QUEST_REWARDS.BADGE, value: 'Youth Advocate' }
+    ],
+    icon: '🌟',
+    unlockCondition: { minHours: 15 }
+  },
+  {
+    id: 'century_club',
+    title: 'Century Club',
+    description: 'Reach 100 total volunteer hours',
+    type: QUEST_TYPES.HOURS_MILESTONE,
+    difficulty: QUEST_DIFFICULTY.EPIC,
+    target: 100,
+    timeLimit: null,
+    rewards: [
+      { type: QUEST_REWARDS.POINTS, value: 1000 },
+      { type: QUEST_REWARDS.PHYSICAL, value: 'YMCA T-Shirt' },
+      { type: QUEST_REWARDS.TITLE, value: 'Century Champion' }
+    ],
+    icon: '🏆',
+    unlockCondition: { minHours: 75 }
+  },
+  {
+    id: 'community_builder',
+    title: 'Community Builder',
+    description: 'Help recruit 3 new volunteers this month',
+    type: QUEST_TYPES.COMMUNITY_CHALLENGE,
+    difficulty: QUEST_DIFFICULTY.HARD,
+    target: 3,
+    timeLimit: 2592000000, // 30 days in ms
+    rewards: [
+      { type: QUEST_REWARDS.POINTS, value: 750 },
+      { type: QUEST_REWARDS.BADGE, value: 'Community Builder' },
+      { type: QUEST_REWARDS.TITLE, value: 'The Recruiter' }
+    ],
+    icon: '🏘️',
+    unlockCondition: { minHours: 40 }
+  }
+]
+
+// Quest utility functions
+export function getAvailableQuests(userHours, completedQuestIds = []) {
+  return QUESTS_CONFIG.filter(quest => {
+    if (completedQuestIds.includes(quest.id)) return false
+    return userHours >= quest.unlockCondition.minHours
+  })
+}
+
+export function calculateQuestProgress(quest, userProgress) {
+  const progress = userProgress[quest.type] || 0
+  return Math.min(progress, quest.target)
+}
+
+export function isQuestExpired(quest, startTime) {
+  if (!quest.timeLimit || !startTime) return false
+  return Date.now() - startTime > quest.timeLimit
+}
+
+export function getQuestStatusColor(status) {
+  switch (status) {
+    case QUEST_STATUS.ACTIVE: return '#3B82F6'
+    case QUEST_STATUS.COMPLETED: return '#10B981'
+    case QUEST_STATUS.EXPIRED: return '#EF4444'
+    case QUEST_STATUS.LOCKED: return '#6B7280'
+    default: return '#6B7280'
+  }
+}
+
+export function getDifficultyColor(difficulty) {
+  switch (difficulty) {
+    case QUEST_DIFFICULTY.EASY: return '#10B981'
+    case QUEST_DIFFICULTY.MEDIUM: return '#F59E0B'
+    case QUEST_DIFFICULTY.HARD: return '#EF4444'
+    case QUEST_DIFFICULTY.EPIC: return '#8B5CF6'
+    default: return '#6B7280'
+  }
 }
