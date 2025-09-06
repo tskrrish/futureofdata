@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YMCA Volunteer Opportunity Marketplace</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+    <style>
+        .opportunity-card {
+            transition: all 0.3s ease;
+            border: 1px solid #e5e7eb;
+        }
+        .opportunity-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        }
+        .filter-section {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        }
+        .search-input {
+            background: rgba(255, 255, 255, 0.9);
+            backdrop-filter: blur(10px);
+        }
+        .score-badge {
+            background: linear-gradient(45deg, #4CAF50, #45a049);
+        }
+        .urgency-high {
+            background: linear-gradient(45deg, #ff6b6b, #ee5a52);
+        }
+        .urgency-medium {
+            background: linear-gradient(45deg, #ffa726, #ff9800);
+        }
+        .pagination-button {
+            transition: all 0.2s ease;
+        }
+        .pagination-button:hover {
+            transform: scale(1.05);
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <div id="marketplace-root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // Main Marketplace Component
+        function OpportunityMarketplace() {
+            const [opportunities, setOpportunities] = useState([]);
+            const [filters, setFilters] = useState({});
+            const [activeFilters, setActiveFilters] = useState({
+                category: '',
+                branch: '',
+                min_hours: '',
+                max_hours: '',
+                time_commitment: '',
+                skills_required: ''
+            });
+            const [searchQuery, setSearchQuery] = useState('');
+            const [loading, setLoading] = useState(false);
+            const [pagination, setPagination] = useState({
+                page: 1,
+                limit: 12,
+                total: 0,
+                has_next: false,
+                has_prev: false
+            });
+            const [viewMode, setViewMode] = useState('grid'); // 'grid' or 'list'
+            const [sortBy, setSortBy] = useState('score'); // 'score', 'popularity', 'urgency'
+
+            // Load filter options
+            useEffect(() => {
+                loadFilters();
+            }, []);
+
+            // Load opportunities when filters or pagination change
+            useEffect(() => {
+                if (searchQuery) {
+                    searchOpportunities();
+                } else {
+                    loadOpportunities();
+                }
+            }, [activeFilters, pagination.page, sortBy]);
+
+            const loadFilters = async () => {
+                try {
+                    const response = await fetch('/api/marketplace/filters');
+                    const data = await response.json();
+                    setFilters(data.filters || {});
+                } catch (error) {
+                    console.error('Error loading filters:', error);
+                }
+            };
+
+            const loadOpportunities = async () => {
+                setLoading(true);
+                try {
+                    const params = new URLSearchParams({
+                        page: pagination.page,
+                        limit: pagination.limit,
+                        ...activeFilters
+                    });
+                    
+                    // Remove empty filters
+                    Object.keys(activeFilters).forEach(key => {
+                        if (!activeFilters[key]) params.delete(key);
+                    });
+
+                    const response = await fetch(`/api/marketplace/opportunities?${params}`);
+                    const data = await response.json();
+                    
+                    setOpportunities(data.opportunities || []);
+                    setPagination(prev => ({
+                        ...prev,
+                        total: data.total,
+                        has_next: data.has_next,
+                        has_prev: data.has_prev
+                    }));
+                } catch (error) {
+                    console.error('Error loading opportunities:', error);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const searchOpportunities = async () => {
+                if (!searchQuery.trim()) return;
+                
+                setLoading(true);
+                try {
+                    const response = await fetch(`/api/marketplace/search?q=${encodeURIComponent(searchQuery)}&limit=${pagination.limit}`);
+                    const data = await response.json();
+                    setOpportunities(data.results || []);
+                    setPagination(prev => ({ ...prev, total: data.total_found || 0 }));
+                } catch (error) {
+                    console.error('Error searching opportunities:', error);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const handleFilterChange = (filterKey, value) => {
+                setActiveFilters(prev => ({
+                    ...prev,
+                    [filterKey]: value
+                }));
+                setPagination(prev => ({ ...prev, page: 1 }));
+            };
+
+            const handleSearch = (e) => {
+                e.preventDefault();
+                searchOpportunities();
+            };
+
+            const clearFilters = () => {
+                setActiveFilters({
+                    category: '',
+                    branch: '',
+                    min_hours: '',
+                    max_hours: '',
+                    time_commitment: '',
+                    skills_required: ''
+                });
+                setSearchQuery('');
+                setPagination(prev => ({ ...prev, page: 1 }));
+            };
+
+            const changePage = (newPage) => {
+                setPagination(prev => ({ ...prev, page: newPage }));
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            };
+
+            return (
+                <div className="min-h-screen bg-gray-50">
+                    {/* Header */}
+                    <div className="filter-section text-white py-8">
+                        <div className="max-w-7xl mx-auto px-4">
+                            <div className="text-center mb-8">
+                                <h1 className="text-4xl font-bold mb-2">YMCA Volunteer Marketplace</h1>
+                                <p className="text-xl opacity-90">Discover meaningful volunteer opportunities that match your interests</p>
+                            </div>
+
+                            {/* Search Bar */}
+                            <form onSubmit={handleSearch} className="max-w-2xl mx-auto mb-8">
+                                <div className="relative">
+                                    <input
+                                        type="text"
+                                        value={searchQuery}
+                                        onChange={(e) => setSearchQuery(e.target.value)}
+                                        placeholder="Search opportunities by keyword..."
+                                        className="search-input w-full px-6 py-4 rounded-full text-gray-800 text-lg focus:outline-none focus:ring-4 focus:ring-white focus:ring-opacity-50"
+                                    />
+                                    <button
+                                        type="submit"
+                                        className="absolute right-2 top-2 bottom-2 px-6 bg-blue-600 text-white rounded-full hover:bg-blue-700 transition-colors"
+                                    >
+                                        Search
+                                    </button>
+                                </div>
+                            </form>
+
+                            {/* Filters */}
+                            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+                                <select
+                                    value={activeFilters.category}
+                                    onChange={(e) => handleFilterChange('category', e.target.value)}
+                                    className="px-4 py-2 rounded-lg text-gray-800 bg-white bg-opacity-90 focus:outline-none focus:ring-2 focus:ring-white"
+                                >
+                                    <option value="">All Categories</option>
+                                    {filters.categories?.map(category => (
+                                        <option key={category} value={category}>{category}</option>
+                                    ))}
+                                </select>
+
+                                <select
+                                    value={activeFilters.branch}
+                                    onChange={(e) => handleFilterChange('branch', e.target.value)}
+                                    className="px-4 py-2 rounded-lg text-gray-800 bg-white bg-opacity-90 focus:outline-none focus:ring-2 focus:ring-white"
+                                >
+                                    <option value="">All Branches</option>
+                                    {filters.branches?.map(branch => (
+                                        <option key={branch} value={branch}>{branch}</option>
+                                    ))}
+                                </select>
+
+                                <select
+                                    value={activeFilters.time_commitment}
+                                    onChange={(e) => handleFilterChange('time_commitment', e.target.value)}
+                                    className="px-4 py-2 rounded-lg text-gray-800 bg-white bg-opacity-90 focus:outline-none focus:ring-2 focus:ring-white"
+                                >
+                                    <option value="">Any Time</option>
+                                    {filters.time_commitments?.map(tc => (
+                                        <option key={tc.value} value={tc.value}>{tc.label}</option>
+                                    ))}
+                                </select>
+
+                                <input
+                                    type="number"
+                                    placeholder="Min hours"
+                                    value={activeFilters.min_hours}
+                                    onChange={(e) => handleFilterChange('min_hours', e.target.value)}
+                                    className="px-4 py-2 rounded-lg text-gray-800 bg-white bg-opacity-90 focus:outline-none focus:ring-2 focus:ring-white"
+                                />
+
+                                <input
+                                    type="number"
+                                    placeholder="Max hours"
+                                    value={activeFilters.max_hours}
+                                    onChange={(e) => handleFilterChange('max_hours', e.target.value)}
+                                    className="px-4 py-2 rounded-lg text-gray-800 bg-white bg-opacity-90 focus:outline-none focus:ring-2 focus:ring-white"
+                                />
+
+                                <button
+                                    onClick={clearFilters}
+                                    className="px-4 py-2 bg-white bg-opacity-20 text-white rounded-lg hover:bg-opacity-30 transition-all"
+                                >
+                                    Clear All
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Controls */}
+                    <div className="max-w-7xl mx-auto px-4 py-6">
+                        <div className="flex flex-col md:flex-row justify-between items-center mb-6">
+                            <div className="flex items-center space-x-4 mb-4 md:mb-0">
+                                <span className="text-gray-600">
+                                    {pagination.total} opportunities found
+                                </span>
+                                {loading && (
+                                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
+                                )}
+                            </div>
+
+                            <div className="flex items-center space-x-4">
+                                <select
+                                    value={sortBy}
+                                    onChange={(e) => setSortBy(e.target.value)}
+                                    className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                >
+                                    <option value="score">Best Match</option>
+                                    <option value="popularity">Most Popular</option>
+                                    <option value="urgency">Most Urgent</option>
+                                </select>
+
+                                <div className="flex border border-gray-300 rounded-lg overflow-hidden">
+                                    <button
+                                        onClick={() => setViewMode('grid')}
+                                        className={`px-4 py-2 ${viewMode === 'grid' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600'}`}
+                                    >
+                                        Grid
+                                    </button>
+                                    <button
+                                        onClick={() => setViewMode('list')}
+                                        className={`px-4 py-2 ${viewMode === 'list' ? 'bg-blue-600 text-white' : 'bg-white text-gray-600'}`}
+                                    >
+                                        List
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        {/* Opportunities Grid/List */}
+                        {loading ? (
+                            <div className="text-center py-12">
+                                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+                                <p className="mt-4 text-gray-600">Loading opportunities...</p>
+                            </div>
+                        ) : opportunities.length === 0 ? (
+                            <div className="text-center py-12">
+                                <p className="text-xl text-gray-600 mb-4">No opportunities found</p>
+                                <p className="text-gray-500">Try adjusting your filters or search terms</p>
+                            </div>
+                        ) : (
+                            <div className={viewMode === 'grid' ? 
+                                "grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6" : 
+                                "space-y-4"
+                            }>
+                                {opportunities.map(opportunity => (
+                                    <OpportunityCard 
+                                        key={opportunity.project_id} 
+                                        opportunity={opportunity}
+                                        viewMode={viewMode}
+                                    />
+                                ))}
+                            </div>
+                        )}
+
+                        {/* Pagination */}
+                        {pagination.total > pagination.limit && (
+                            <div className="flex justify-center items-center space-x-4 mt-12">
+                                <button
+                                    onClick={() => changePage(pagination.page - 1)}
+                                    disabled={!pagination.has_prev}
+                                    className="pagination-button px-4 py-2 bg-white border border-gray-300 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                                >
+                                    Previous
+                                </button>
+
+                                <div className="flex space-x-2">
+                                    {[...Array(Math.min(5, Math.ceil(pagination.total / pagination.limit)))].map((_, i) => {
+                                        const pageNum = pagination.page - 2 + i;
+                                        if (pageNum < 1 || pageNum > Math.ceil(pagination.total / pagination.limit)) return null;
+                                        
+                                        return (
+                                            <button
+                                                key={pageNum}
+                                                onClick={() => changePage(pageNum)}
+                                                className={`pagination-button w-10 h-10 rounded-lg ${
+                                                    pageNum === pagination.page
+                                                        ? 'bg-blue-600 text-white'
+                                                        : 'bg-white border border-gray-300 hover:bg-gray-50'
+                                                }`}
+                                            >
+                                                {pageNum}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+
+                                <button
+                                    onClick={() => changePage(pagination.page + 1)}
+                                    disabled={!pagination.has_next}
+                                    className="pagination-button px-4 py-2 bg-white border border-gray-300 rounded-lg disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-50"
+                                >
+                                    Next
+                                </button>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        // Opportunity Card Component
+        function OpportunityCard({ opportunity, viewMode }) {
+            const [showDetails, setShowDetails] = useState(false);
+
+            const getScoreColor = (score) => {
+                if (score >= 0.8) return 'bg-green-500';
+                if (score >= 0.6) return 'bg-yellow-500';
+                return 'bg-gray-500';
+            };
+
+            const getUrgencyClass = (urgency) => {
+                if (urgency?.level === 'high') return 'urgency-high';
+                if (urgency?.level === 'medium') return 'urgency-medium';
+                return 'bg-gray-500';
+            };
+
+            const handleApply = async () => {
+                const applicationData = {
+                    project_id: opportunity.project_id,
+                    message: "I'm interested in this volunteer opportunity and would like to learn more.",
+                    availability: { flexible: true }
+                };
+
+                try {
+                    const response = await fetch('/api/marketplace/apply', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(applicationData)
+                    });
+
+                    if (response.ok) {
+                        alert('Application submitted successfully!');
+                    } else {
+                        alert('Please log in to apply for opportunities.');
+                    }
+                } catch (error) {
+                    console.error('Error applying:', error);
+                    alert('Error submitting application. Please try again.');
+                }
+            };
+
+            if (viewMode === 'list') {
+                return (
+                    <div className="opportunity-card bg-white rounded-lg p-6 flex flex-col md:flex-row items-start space-y-4 md:space-y-0 md:space-x-6">
+                        <div className="flex-1">
+                            <div className="flex items-start justify-between mb-2">
+                                <h3 className="text-xl font-semibold text-gray-800 mb-2">{opportunity.project_name}</h3>
+                                <div className="flex items-center space-x-2">
+                                    {opportunity.personalized_score && (
+                                        <span className={`score-badge px-3 py-1 rounded-full text-white text-sm font-medium ${getScoreColor(opportunity.personalized_score)}`}>
+                                            {Math.round(opportunity.personalized_score * 100)}% match
+                                        </span>
+                                    )}
+                                    {opportunity.urgency_indicator?.level !== 'normal' && (
+                                        <span className={`px-3 py-1 rounded-full text-white text-sm font-medium ${getUrgencyClass(opportunity.urgency_indicator)}`}>
+                                            {opportunity.urgency_indicator.level} priority
+                                        </span>
+                                    )}
+                                </div>
+                            </div>
+                            
+                            <div className="flex flex-wrap gap-4 text-sm text-gray-600 mb-3">
+                                <span className="flex items-center">
+                                    📍 {opportunity.branch}
+                                </span>
+                                <span className="flex items-center">
+                                    🏷️ {opportunity.category}
+                                </span>
+                                <span className="flex items-center">
+                                    ⏰ {opportunity.avg_hours_per_session}h per session
+                                </span>
+                                <span className="flex items-center">
+                                    👥 {opportunity.unique_volunteers || 0} volunteers
+                                </span>
+                            </div>
+
+                            <p className="text-gray-700 mb-4 line-clamp-2">
+                                {opportunity.need || opportunity.sample_activities || 'Help make a difference in your community.'}
+                            </p>
+
+                            {opportunity.reasons && (
+                                <div className="mb-4">
+                                    <p className="text-sm font-medium text-gray-600 mb-1">Why this matches you:</p>
+                                    <div className="flex flex-wrap gap-2">
+                                        {opportunity.reasons.slice(0, 2).map((reason, idx) => (
+                                            <span key={idx} className="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded">
+                                                {reason}
+                                            </span>
+                                        ))}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+
+                        <div className="flex flex-col space-y-3 md:w-48">
+                            <button
+                                onClick={handleApply}
+                                className="w-full bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors font-medium"
+                            >
+                                Apply Now
+                            </button>
+                            <button
+                                onClick={() => setShowDetails(!showDetails)}
+                                className="w-full border border-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-50 transition-colors"
+                            >
+                                {showDetails ? 'Hide Details' : 'View Details'}
+                            </button>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="opportunity-card bg-white rounded-lg overflow-hidden">
+                    <div className="p-6">
+                        <div className="flex justify-between items-start mb-3">
+                            <h3 className="text-lg font-semibold text-gray-800 line-clamp-2 flex-1 mr-2">
+                                {opportunity.project_name}
+                            </h3>
+                            {opportunity.personalized_score && (
+                                <span className={`score-badge px-2 py-1 rounded-full text-white text-xs font-medium ${getScoreColor(opportunity.personalized_score)}`}>
+                                    {Math.round(opportunity.personalized_score * 100)}%
+                                </span>
+                            )}
+                        </div>
+
+                        <div className="text-sm text-gray-600 mb-3 space-y-1">
+                            <p>📍 {opportunity.branch}</p>
+                            <p>🏷️ {opportunity.category}</p>
+                            <p>⏰ {opportunity.avg_hours_per_session}h per session</p>
+                            <p>👥 {opportunity.unique_volunteers || 0} volunteers</p>
+                        </div>
+
+                        <p className="text-gray-700 text-sm mb-4 line-clamp-3">
+                            {opportunity.need || opportunity.sample_activities || 'Help make a difference in your community.'}
+                        </p>
+
+                        {opportunity.urgency_indicator?.level !== 'normal' && (
+                            <div className={`mb-4 px-3 py-2 rounded-lg text-white text-sm ${getUrgencyClass(opportunity.urgency_indicator)}`}>
+                                <strong>{opportunity.urgency_indicator.level.toUpperCase()} PRIORITY</strong>
+                                {opportunity.urgency_indicator.reason && (
+                                    <p className="mt-1 text-xs opacity-90">{opportunity.urgency_indicator.reason}</p>
+                                )}
+                            </div>
+                        )}
+
+                        {opportunity.reasons && (
+                            <div className="mb-4">
+                                <p className="text-xs font-medium text-gray-600 mb-2">Why this matches you:</p>
+                                <div className="space-y-1">
+                                    {opportunity.reasons.slice(0, 2).map((reason, idx) => (
+                                        <p key={idx} className="text-xs text-blue-700 bg-blue-50 px-2 py-1 rounded">
+                                            • {reason}
+                                        </p>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+
+                        <div className="space-y-2">
+                            <button
+                                onClick={handleApply}
+                                className="w-full bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors font-medium"
+                            >
+                                Apply Now
+                            </button>
+                            <button
+                                onClick={() => setShowDetails(!showDetails)}
+                                className="w-full border border-gray-300 text-gray-700 px-4 py-2 rounded-lg hover:bg-gray-50 transition-colors text-sm"
+                            >
+                                View Details
+                            </button>
+                        </div>
+
+                        {showDetails && (
+                            <div className="mt-4 pt-4 border-t border-gray-200 text-sm">
+                                <div className="space-y-2">
+                                    {opportunity.required_credentials && (
+                                        <div>
+                                            <strong>Requirements:</strong>
+                                            <p className="text-gray-600">{opportunity.required_credentials}</p>
+                                        </div>
+                                    )}
+                                    {opportunity.sample_activities && (
+                                        <div>
+                                            <strong>Activities:</strong>
+                                            <p className="text-gray-600">{opportunity.sample_activities}</p>
+                                        </div>
+                                    )}
+                                    {opportunity.estimated_satisfaction && (
+                                        <div>
+                                            <strong>Satisfaction Score:</strong>
+                                            <p className="text-gray-600">{Math.round(opportunity.estimated_satisfaction * 100)}% predicted satisfaction</p>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
+        }
+
+        // Render the app
+        ReactDOM.render(<OpportunityMarketplace />, document.getElementById('marketplace-root'));
+    </script>
+</body>
+</html>

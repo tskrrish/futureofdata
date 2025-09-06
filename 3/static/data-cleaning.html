@@ -1,0 +1,790 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Data Cleaning Assistant</title>
+    <style>
+        :root {
+            --bg: #ffffff;
+            --fg: #111111;
+            --muted: #6b7280;
+            --border: #e5e7eb;
+            --accent: #3b82f6;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --error: #ef4444;
+        }
+        
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
+        body {
+            font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto;
+            background: var(--bg);
+            color: var(--fg);
+            line-height: 1.6;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding: 20px 0;
+            border-bottom: 2px solid var(--border);
+        }
+        
+        .header h1 {
+            font-size: 2rem;
+            margin-bottom: 10px;
+            color: var(--accent);
+        }
+        
+        .header p {
+            color: var(--muted);
+            font-size: 1.1rem;
+        }
+        
+        .main-content {
+            display: grid;
+            grid-template-columns: 1fr 400px;
+            gap: 30px;
+            margin-bottom: 30px;
+        }
+        
+        .data-section {
+            background: #f9fafb;
+            border-radius: 12px;
+            padding: 25px;
+            border: 1px solid var(--border);
+        }
+        
+        .chat-section {
+            background: #f9fafb;
+            border-radius: 12px;
+            padding: 25px;
+            border: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            height: 600px;
+        }
+        
+        .section-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-bottom: 20px;
+            color: var(--fg);
+        }
+        
+        .upload-area {
+            border: 2px dashed var(--border);
+            border-radius: 8px;
+            padding: 30px;
+            text-align: center;
+            background: white;
+            margin-bottom: 20px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .upload-area:hover {
+            border-color: var(--accent);
+            background: #f8faff;
+        }
+        
+        .upload-area.dragover {
+            border-color: var(--accent);
+            background: #f0f7ff;
+        }
+        
+        .upload-icon {
+            font-size: 2rem;
+            margin-bottom: 10px;
+            color: var(--muted);
+        }
+        
+        .upload-text {
+            color: var(--muted);
+            margin-bottom: 15px;
+        }
+        
+        .file-input {
+            display: none;
+        }
+        
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 6px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            text-decoration: none;
+            font-size: 0.9rem;
+        }
+        
+        .btn-primary {
+            background: var(--accent);
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            background: #2563eb;
+        }
+        
+        .btn-secondary {
+            background: var(--muted);
+            color: white;
+        }
+        
+        .btn-secondary:hover {
+            background: #4b5563;
+        }
+        
+        .btn-success {
+            background: var(--success);
+            color: white;
+        }
+        
+        .btn-success:hover {
+            background: #059669;
+        }
+        
+        .data-info {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .data-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        
+        .stat-card {
+            text-align: center;
+            padding: 15px;
+            background: #f8faff;
+            border-radius: 6px;
+        }
+        
+        .stat-value {
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: var(--accent);
+        }
+        
+        .stat-label {
+            color: var(--muted);
+            font-size: 0.9rem;
+            margin-top: 5px;
+        }
+        
+        .issues-list {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        .issue-item {
+            display: flex;
+            align-items: center;
+            padding: 10px 0;
+            border-bottom: 1px solid #f3f4f6;
+        }
+        
+        .issue-item:last-child {
+            border-bottom: none;
+        }
+        
+        .issue-icon {
+            margin-right: 10px;
+            font-size: 1.2rem;
+        }
+        
+        .issue-icon.warning {
+            color: var(--warning);
+        }
+        
+        .issue-icon.error {
+            color: var(--error);
+        }
+        
+        .issue-text {
+            flex: 1;
+            font-size: 0.9rem;
+        }
+        
+        .chat-messages {
+            flex: 1;
+            background: white;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+            overflow-y: auto;
+            max-height: 400px;
+        }
+        
+        .message {
+            margin-bottom: 15px;
+            padding: 12px;
+            border-radius: 8px;
+        }
+        
+        .message.user {
+            background: var(--accent);
+            color: white;
+            margin-left: 20%;
+            text-align: right;
+        }
+        
+        .message.assistant {
+            background: #f3f4f6;
+            margin-right: 20%;
+        }
+        
+        .message-content {
+            white-space: pre-wrap;
+        }
+        
+        .chat-input {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .chat-input input {
+            flex: 1;
+            padding: 12px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            font-size: 1rem;
+        }
+        
+        .chat-input input:focus {
+            outline: none;
+            border-color: var(--accent);
+        }
+        
+        .actions-section {
+            background: #f9fafb;
+            border-radius: 12px;
+            padding: 25px;
+            border: 1px solid var(--border);
+            margin-top: 20px;
+        }
+        
+        .actions-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+        
+        .action-card {
+            background: white;
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 1px solid var(--border);
+        }
+        
+        .action-card:hover {
+            border-color: var(--accent);
+            transform: translateY(-2px);
+        }
+        
+        .action-icon {
+            font-size: 2rem;
+            margin-bottom: 10px;
+            color: var(--accent);
+        }
+        
+        .action-title {
+            font-weight: 600;
+            margin-bottom: 5px;
+        }
+        
+        .action-desc {
+            color: var(--muted);
+            font-size: 0.9rem;
+        }
+        
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 20px;
+            color: var(--muted);
+        }
+        
+        .loading.show {
+            display: block;
+        }
+        
+        .spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid var(--accent);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .alert {
+            padding: 12px 16px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+        }
+        
+        .alert.success {
+            background: #d1fae5;
+            color: #065f46;
+            border: 1px solid #a7f3d0;
+        }
+        
+        .alert.error {
+            background: #fee2e2;
+            color: #991b1b;
+            border: 1px solid #fca5a5;
+        }
+        
+        .alert.warning {
+            background: #fef3c7;
+            color: #92400e;
+            border: 1px solid #fde68a;
+        }
+        
+        @media (max-width: 768px) {
+            .main-content {
+                grid-template-columns: 1fr;
+            }
+            
+            .container {
+                padding: 15px;
+            }
+            
+            .actions-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🧹 AI Data Cleaning Assistant</h1>
+            <p>Chat to fix columns, merge duplicates, and resolve data errors automatically</p>
+        </div>
+        
+        <div class="main-content">
+            <div class="data-section">
+                <h2 class="section-title">📊 Your Data</h2>
+                
+                <div id="upload-area" class="upload-area">
+                    <div class="upload-icon">📁</div>
+                    <div class="upload-text">
+                        Drag and drop your CSV or Excel file here<br>
+                        or click to browse
+                    </div>
+                    <button class="btn btn-primary">Choose File</button>
+                    <input type="file" id="file-input" class="file-input" accept=".csv,.xlsx,.xls">
+                </div>
+                
+                <div id="data-info" class="data-info" style="display: none;">
+                    <div class="data-stats">
+                        <div class="stat-card">
+                            <div id="rows-count" class="stat-value">-</div>
+                            <div class="stat-label">Rows</div>
+                        </div>
+                        <div class="stat-card">
+                            <div id="columns-count" class="stat-value">-</div>
+                            <div class="stat-label">Columns</div>
+                        </div>
+                        <div class="stat-card">
+                            <div id="issues-count" class="stat-value">-</div>
+                            <div class="stat-label">Issues</div>
+                        </div>
+                    </div>
+                    
+                    <div id="issues-list" class="issues-list">
+                        <h3>Data Quality Issues</h3>
+                        <div id="issues-content">
+                            <!-- Issues will be populated here -->
+                        </div>
+                    </div>
+                    
+                    <div style="text-align: center; margin-top: 20px;">
+                        <button id="export-btn" class="btn btn-success" style="display: none;">
+                            📥 Export Cleaned Data
+                        </button>
+                    </div>
+                </div>
+                
+                <div id="loading" class="loading">
+                    <div class="spinner"></div>
+                    <div>Analyzing your data...</div>
+                </div>
+            </div>
+            
+            <div class="chat-section">
+                <h2 class="section-title">💬 Chat Assistant</h2>
+                
+                <div id="chat-messages" class="chat-messages">
+                    <div class="message assistant">
+                        <div class="message-content">Hi! I'm your data cleaning assistant. Upload your data and I'll help you clean it through natural conversation. Try saying things like:
+
+• "Remove duplicate rows"
+• "Fill missing values in the email column"
+• "Fix data types"
+• "Standardize the name column"</div>
+                    </div>
+                </div>
+                
+                <div class="chat-input">
+                    <input type="text" id="message-input" placeholder="How can I help clean your data?" disabled>
+                    <button id="send-btn" class="btn btn-primary" disabled>Send</button>
+                </div>
+            </div>
+        </div>
+        
+        <div class="actions-section">
+            <h2 class="section-title">🔧 Quick Actions</h2>
+            
+            <div class="actions-grid">
+                <div class="action-card" onclick="quickAction('remove_duplicates')">
+                    <div class="action-icon">🗑️</div>
+                    <div class="action-title">Remove Duplicates</div>
+                    <div class="action-desc">Find and remove duplicate rows</div>
+                </div>
+                
+                <div class="action-card" onclick="quickAction('fill_missing')">
+                    <div class="action-icon">🔧</div>
+                    <div class="action-title">Fill Missing</div>
+                    <div class="action-desc">Handle missing values intelligently</div>
+                </div>
+                
+                <div class="action-card" onclick="quickAction('fix_types')">
+                    <div class="action-icon">🔄</div>
+                    <div class="action-title">Fix Types</div>
+                    <div class="action-desc">Convert columns to proper data types</div>
+                </div>
+                
+                <div class="action-card" onclick="quickAction('standardize')">
+                    <div class="action-icon">✨</div>
+                    <div class="action-title">Standardize</div>
+                    <div class="action-desc">Clean and standardize text values</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        let currentData = null;
+        let sessionId = null;
+        
+        // Initialize
+        document.addEventListener('DOMContentLoaded', function() {
+            const fileInput = document.getElementById('file-input');
+            const uploadArea = document.getElementById('upload-area');
+            const messageInput = document.getElementById('message-input');
+            const sendBtn = document.getElementById('send-btn');
+            
+            // File upload handling
+            uploadArea.addEventListener('click', () => fileInput.click());
+            uploadArea.addEventListener('dragover', handleDragOver);
+            uploadArea.addEventListener('drop', handleDrop);
+            fileInput.addEventListener('change', handleFileSelect);
+            
+            // Chat handling
+            sendBtn.addEventListener('click', sendMessage);
+            messageInput.addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') sendMessage();
+            });
+        });
+        
+        function handleDragOver(e) {
+            e.preventDefault();
+            e.target.closest('.upload-area').classList.add('dragover');
+        }
+        
+        function handleDrop(e) {
+            e.preventDefault();
+            e.target.closest('.upload-area').classList.remove('dragover');
+            
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                processFile(files[0]);
+            }
+        }
+        
+        function handleFileSelect(e) {
+            const file = e.target.files[0];
+            if (file) {
+                processFile(file);
+            }
+        }
+        
+        async function processFile(file) {
+            showLoading(true);
+            
+            try {
+                const formData = new FormData();
+                formData.append('file', file);
+                
+                // For demo purposes, we'll create sample data
+                // In a real implementation, you'd parse the file
+                const sampleData = {
+                    data: {
+                        'Name': ['John Doe', 'jane smith', 'JOHN DOE', 'Jane Smith', null],
+                        'Email': ['john@email.com', 'jane@email.com', 'john@email.com', null, 'invalid'],
+                        'Age': [25, 30, 25, 30, 150],
+                        'Salary': ['50000', '60,000', '$70000', '80000', null]
+                    },
+                    file_name: file.name
+                };
+                
+                const response = await fetch('/api/data-cleaning/upload', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(sampleData)
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    currentData = result;
+                    displayDataInfo(result);
+                    enableChat();
+                    showAlert('Data uploaded and analyzed successfully!', 'success');
+                } else {
+                    showAlert('Failed to upload data', 'error');
+                }
+                
+            } catch (error) {
+                console.error('Upload error:', error);
+                showAlert('Error uploading file: ' + error.message, 'error');
+            } finally {
+                showLoading(false);
+            }
+        }
+        
+        function displayDataInfo(data) {
+            const dataInfo = document.getElementById('data-info');
+            const shape = data.data_shape;
+            const analysis = data.analysis;
+            
+            // Update stats
+            document.getElementById('rows-count').textContent = shape ? shape[0] : '-';
+            document.getElementById('columns-count').textContent = shape ? shape[1] : '-';
+            
+            // Count total issues
+            let totalIssues = 0;
+            if (analysis.missing_values) totalIssues += Object.keys(analysis.missing_values).length;
+            if (analysis.duplicates?.exact_duplicates?.count) totalIssues += 1;
+            if (analysis.data_types) totalIssues += Object.keys(analysis.data_types).length;
+            
+            document.getElementById('issues-count').textContent = totalIssues;
+            
+            // Display issues
+            const issuesContent = document.getElementById('issues-content');
+            issuesContent.innerHTML = '';
+            
+            // Missing values
+            if (analysis.missing_values) {
+                Object.entries(analysis.missing_values).forEach(([col, info]) => {
+                    addIssueItem(`Missing values in "${col}": ${info.percentage}%`, 'warning');
+                });
+            }
+            
+            // Duplicates
+            if (analysis.duplicates?.exact_duplicates?.count > 0) {
+                addIssueItem(`${analysis.duplicates.exact_duplicates.count} duplicate rows found`, 'error');
+            }
+            
+            // Data type issues
+            if (analysis.data_types) {
+                Object.entries(analysis.data_types).forEach(([col, info]) => {
+                    addIssueItem(`Column "${col}" should be ${info.suggested} instead of ${info.current}`, 'warning');
+                });
+            }
+            
+            dataInfo.style.display = 'block';
+            document.getElementById('export-btn').style.display = 'inline-block';
+        }
+        
+        function addIssueItem(text, type) {
+            const issuesContent = document.getElementById('issues-content');
+            const issueItem = document.createElement('div');
+            issueItem.className = 'issue-item';
+            
+            const icon = type === 'error' ? '❌' : '⚠️';
+            
+            issueItem.innerHTML = `
+                <span class="issue-icon ${type}">${icon}</span>
+                <span class="issue-text">${text}</span>
+            `;
+            
+            issuesContent.appendChild(issueItem);
+        }
+        
+        function enableChat() {
+            document.getElementById('message-input').disabled = false;
+            document.getElementById('send-btn').disabled = false;
+        }
+        
+        async function sendMessage() {
+            const messageInput = document.getElementById('message-input');
+            const message = messageInput.value.trim();
+            
+            if (!message) return;
+            
+            addMessage(message, 'user');
+            messageInput.value = '';
+            
+            try {
+                const response = await fetch('/api/data-cleaning/chat', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        message: message,
+                        session_id: sessionId
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    addMessage(result.response, 'assistant');
+                    
+                    // If there are suggested actions, apply them
+                    if (result.suggested_actions && result.suggested_actions.length > 0) {
+                        for (const action of result.suggested_actions) {
+                            if (action.suggested) {
+                                // You could automatically apply suggested actions or ask for confirmation
+                                console.log('Suggested action:', action);
+                            }
+                        }
+                    }
+                } else {
+                    addMessage('Sorry, I had trouble processing your request. Please try again.', 'assistant');
+                }
+                
+            } catch (error) {
+                console.error('Chat error:', error);
+                addMessage('Error: ' + error.message, 'assistant');
+            }
+        }
+        
+        function addMessage(content, sender) {
+            const messagesContainer = document.getElementById('chat-messages');
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `message ${sender}`;
+            messageDiv.innerHTML = `<div class="message-content">${content}</div>`;
+            
+            messagesContainer.appendChild(messageDiv);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+        
+        async function quickAction(actionType) {
+            if (!currentData) {
+                showAlert('Please upload data first', 'warning');
+                return;
+            }
+            
+            let message = '';
+            switch (actionType) {
+                case 'remove_duplicates':
+                    message = 'Remove all duplicate rows from the data';
+                    break;
+                case 'fill_missing':
+                    message = 'Fill all missing values appropriately';
+                    break;
+                case 'fix_types':
+                    message = 'Fix all data type issues in the columns';
+                    break;
+                case 'standardize':
+                    message = 'Standardize all text columns';
+                    break;
+            }
+            
+            document.getElementById('message-input').value = message;
+            await sendMessage();
+        }
+        
+        function showLoading(show) {
+            const loading = document.getElementById('loading');
+            if (show) {
+                loading.classList.add('show');
+            } else {
+                loading.classList.remove('show');
+            }
+        }
+        
+        function showAlert(message, type) {
+            const alertDiv = document.createElement('div');
+            alertDiv.className = `alert ${type}`;
+            alertDiv.textContent = message;
+            
+            const container = document.querySelector('.container');
+            container.insertBefore(alertDiv, container.firstChild);
+            
+            setTimeout(() => {
+                alertDiv.remove();
+            }, 5000);
+        }
+        
+        // Export functionality
+        document.getElementById('export-btn').addEventListener('click', async function() {
+            try {
+                const response = await fetch('/api/data-cleaning/export/csv');
+                const result = await response.json();
+                
+                if (result.success) {
+                    // Create download link
+                    const link = document.createElement('a');
+                    link.href = result.download_url;
+                    link.download = result.filename;
+                    document.body.appendChild(link);
+                    link.click();
+                    document.body.removeChild(link);
+                    
+                    showAlert('Data exported successfully!', 'success');
+                } else {
+                    showAlert('Export failed', 'error');
+                }
+                
+            } catch (error) {
+                console.error('Export error:', error);
+                showAlert('Export error: ' + error.message, 'error');
+            }
+        });
+    </script>
+</body>
+</html>
