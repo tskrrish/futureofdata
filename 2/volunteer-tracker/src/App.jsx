@@ -3,7 +3,10 @@ import confetti from 'canvas-confetti';
 import { playCheer, playDrumroll, playFanfare, playAmbientTone, playCardFlip, playMagicalSparkle } from './utils/audio.js';
 import Badge from './components/Badge.jsx';
 import CelebrationOverlay from './components/CelebrationOverlay.jsx';
+import MicroCelebration from './components/MicroCelebration.jsx';
+import EnhancedConfetti from './components/EnhancedConfetti.jsx';
 import { getTierForHours, MILESTONES } from './constants.js';
+import { microAchievementTracker } from './utils/microAchievements.js';
 
 function App() {
   const [searchTerm, setSearchTerm] = useState('');
@@ -12,6 +15,11 @@ function App() {
   const firedRef = useRef(false);
   const [showOverlay, setShowOverlay] = useState(false);
   const [hideSearchBar, setHideSearchBar] = useState(false);
+  
+  // Micro-celebration states
+  const [microTrigger, setMicroTrigger] = useState(null);
+  const [microAchievement, setMicroAchievement] = useState(null);
+  const [enhancedConfettiTrigger, setEnhancedConfettiTrigger] = useState(0);
 
   function runFullScreenConfetti(hours) {
     const duration = Math.min(9000, 4000 + hours * 40);
@@ -58,6 +66,29 @@ function App() {
 
       if (found) {
         setVolunteerData(found);
+        
+        // Track the search and check for micro-achievements
+        const achievements = microAchievementTracker.trackSearch(found);
+        
+        // Handle micro-achievements
+        achievements.forEach(achievement => {
+          const config = microAchievementTracker.getCelebrationConfig(achievement);
+          
+          if (achievement.priority === 'high' || achievement.priority === 'epic') {
+            // Trigger micro-celebration popup
+            setMicroAchievement(achievement);
+            setMicroTrigger(achievement.type);
+            
+            // Enhanced confetti
+            setEnhancedConfettiTrigger(prev => prev + 1);
+            
+            // Reset micro trigger after delay
+            setTimeout(() => {
+              setMicroTrigger(null);
+              setMicroAchievement(null);
+            }, config.duration || 3000);
+          }
+        });
       } else {
         setError('Volunteer not found. Try "Richard Bowman" or "Christina Burke"');
       }
@@ -77,6 +108,28 @@ function App() {
       // Hide search bar for 10 seconds
       setHideSearchBar(true);
       setTimeout(() => setHideSearchBar(false), 10000);
+      
+      // Check for special achievements during main celebration
+      const specialAchievements = microAchievementTracker.checkAchievements(volunteerData, { 
+        action: 'main_celebration' 
+      });
+      
+      // Add delayed micro-celebrations during the main sequence
+      specialAchievements.forEach((achievement, index) => {
+        if (achievement.type === 'hours_milestone' || achievement.type === 'community_impact') {
+          setTimeout(() => {
+            setMicroAchievement(achievement);
+            setMicroTrigger(achievement.type);
+            setEnhancedConfettiTrigger(prev => prev + 1);
+            
+            const config = microAchievementTracker.getCelebrationConfig(achievement);
+            setTimeout(() => {
+              setMicroTrigger(null);
+              setMicroAchievement(null);
+            }, config.duration);
+          }, 3000 + (index * 1500)); // Stagger celebrations
+        }
+      });
       
       // Musical sequence
       playDrumroll(600);
@@ -162,6 +215,20 @@ function App() {
         show={showOverlay} 
         seed={volunteerData ? `${volunteerData.first_name}${volunteerData.last_name}` : ''} 
         tier={volunteerData ? getTierForHours(Number(volunteerData.hours_total)) : 'basic'} 
+      />
+
+      {/* New Micro-Celebration Components */}
+      <MicroCelebration 
+        trigger={microTrigger}
+        volunteerData={volunteerData}
+        achievementType={microAchievement}
+      />
+      
+      <EnhancedConfetti 
+        trigger={enhancedConfettiTrigger}
+        volunteerData={volunteerData}
+        achievementType={microAchievement?.type || 'progress_celebration'}
+        duration={microAchievement ? microAchievementTracker.getCelebrationConfig(microAchievement).duration : 3000}
       />
     </div>
   );
