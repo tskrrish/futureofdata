@@ -20,6 +20,7 @@ from ai_assistant import VolunteerAIAssistant
 from matching_engine import VolunteerMatchingEngine
 from data_processor import VolunteerDataProcessor
 from database import VolunteerDatabase
+from volunteer_routing_optimizer import VolunteerRoutingOptimizer
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -43,6 +44,7 @@ ai_assistant = VolunteerAIAssistant()
 database = VolunteerDatabase()
 volunteer_data = None
 matching_engine = None
+routing_optimizer = None
 
 # Pydantic models
 class UserProfile(BaseModel):
@@ -82,7 +84,7 @@ class FeedbackData(BaseModel):
 @app.on_event("startup")
 async def startup_event():
     """Initialize application data and models"""
-    global volunteer_data, matching_engine
+    global volunteer_data, matching_engine, routing_optimizer
     
     print("🚀 Starting Volunteer PathFinder AI Assistant...")
     
@@ -104,8 +106,12 @@ async def startup_event():
             matching_engine = VolunteerMatchingEngine(volunteer_data)
             matching_engine.train_models()
             
+            # Initialize routing optimizer
+            routing_optimizer = VolunteerRoutingOptimizer(volunteer_data)
+            
             print(f"✅ Loaded {len(volunteer_data['volunteers'])} volunteer profiles")
             print(f"✅ Loaded {len(volunteer_data['projects'])} projects")
+            print("✅ Routing optimizer initialized")
         else:
             print(f"⚠️  Volunteer data file not found: {settings.VOLUNTEER_DATA_PATH}")
     except Exception as e:
@@ -144,6 +150,14 @@ async def chat_page():
     if os.path.exists(file_path):
         return FileResponse(file_path)
     return HTMLResponse("<h3>Chat UI not found. Create static/chat.html</h3>", status_code=404)
+
+# Serve routing optimizer UI
+@app.get("/routing", response_class=HTMLResponse)
+async def routing_page():
+    file_path = os.path.join(os.path.dirname(__file__), "static", "routing.html")
+    if os.path.exists(file_path):
+        return FileResponse(file_path)
+    return HTMLResponse("<h3>Routing UI not found. Create static/routing.html</h3>", status_code=404)
 
 class ProfileRequest(BaseModel):
     name: str
@@ -678,6 +692,160 @@ async def get_resources() -> JSONResponse:
     
     return JSONResponse(content=resources)
 
+# Volunteer routing optimization endpoints
+@app.get("/api/routing/optimization-summary")
+async def get_routing_optimization_summary() -> JSONResponse:
+    """Get optimization summary with swap suggestions"""
+    if not routing_optimizer:
+        raise HTTPException(status_code=503, detail="Routing optimizer not available")
+    
+    try:
+        summary = routing_optimizer.get_optimization_summary()
+        return JSONResponse(content=summary)
+    except Exception as e:
+        print(f"❌ Routing optimization error: {e}")
+        raise HTTPException(status_code=500, detail="Routing optimization failed")
+
+@app.get("/api/routing/swap-suggestions")
+async def get_swap_suggestions(top_k: int = 10) -> JSONResponse:
+    """Get better fit swap suggestions between volunteers"""
+    if not routing_optimizer:
+        raise HTTPException(status_code=503, detail="Routing optimizer not available")
+    
+    try:
+        suggestions = routing_optimizer.generate_swap_suggestions(top_k=top_k)
+        
+        # Convert to serializable format
+        serializable_suggestions = []
+        for suggestion in suggestions:
+            # Get volunteer and project names for display
+            v1_data = routing_optimizer.volunteer_features[
+                routing_optimizer.volunteer_features['contact_id'] == suggestion.volunteer_1_id
+            ].iloc[0] if not routing_optimizer.volunteer_features.empty else {}
+            
+            v2_data = routing_optimizer.volunteer_features[
+                routing_optimizer.volunteer_features['contact_id'] == suggestion.volunteer_2_id
+            ].iloc[0] if not routing_optimizer.volunteer_features.empty else {}
+            
+            p1_data = routing_optimizer.project_features[
+                routing_optimizer.project_features['project_id'] == suggestion.project_1_id
+            ].iloc[0] if not routing_optimizer.project_features.empty else {}
+            
+            p2_data = routing_optimizer.project_features[
+                routing_optimizer.project_features['project_id'] == suggestion.project_2_id
+            ].iloc[0] if not routing_optimizer.project_features.empty else {}
+            
+            serializable_suggestions.append({
+                "volunteer_1": {
+                    "id": suggestion.volunteer_1_id,
+                    "name": f"{v1_data.get('first_name', '')} {v1_data.get('last_name', '')}".strip() or "Unknown",
+                    "current_project_id": suggestion.project_1_id,
+                    "current_project_name": p1_data.get('project_name', 'Unknown Project'),
+                    "proposed_project_id": suggestion.project_2_id,
+                    "proposed_project_name": p2_data.get('project_name', 'Unknown Project'),
+                    "improvement_score": float(suggestion.volunteer_1_improvement)
+                },
+                "volunteer_2": {
+                    "id": suggestion.volunteer_2_id,
+                    "name": f"{v2_data.get('first_name', '')} {v2_data.get('last_name', '')}".strip() or "Unknown",
+                    "current_project_id": suggestion.project_2_id,
+                    "current_project_name": p2_data.get('project_name', 'Unknown Project'),
+                    "proposed_project_id": suggestion.project_1_id,
+                    "proposed_project_name": p1_data.get('project_name', 'Unknown Project'),
+                    "improvement_score": float(suggestion.volunteer_2_improvement)
+                },
+                "swap_analysis": {
+                    "current_total_score": float(suggestion.current_total_score),
+                    "proposed_total_score": float(suggestion.proposed_total_score),
+                    "total_improvement": float(suggestion.improvement_score),
+                    "improvement_percentage": float(suggestion.improvement_score / suggestion.current_total_score * 100) if suggestion.current_total_score > 0 else 0,
+                    "reasons": suggestion.swap_reasons
+                }
+            })
+        
+        return JSONResponse(content={
+            "suggestions": serializable_suggestions,
+            "total_suggestions": len(suggestions),
+            "generated_at": datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        print(f"❌ Swap suggestions error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to generate swap suggestions")
+
+@app.get("/api/routing/branch-coverage/{branch_name}")
+async def get_branch_coverage_optimization(branch_name: str, target_coverage: float = 0.8) -> JSONResponse:
+    """Get optimization recommendations for a specific branch"""
+    if not routing_optimizer:
+        raise HTTPException(status_code=503, detail="Routing optimizer not available")
+    
+    try:
+        coverage_analysis = routing_optimizer.optimize_coverage_for_branch(branch_name, target_coverage)
+        
+        if "error" in coverage_analysis:
+            raise HTTPException(status_code=404, detail=coverage_analysis["error"])
+        
+        return JSONResponse(content=coverage_analysis)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Branch coverage optimization error: {e}")
+        raise HTTPException(status_code=500, detail="Branch coverage optimization failed")
+
+@app.get("/api/routing/current-assignments")
+async def get_current_assignments() -> JSONResponse:
+    """Get current volunteer assignments with fit scores"""
+    if not routing_optimizer:
+        raise HTTPException(status_code=503, detail="Routing optimizer not available")
+    
+    try:
+        assignments = routing_optimizer.get_current_assignments()
+        
+        # Convert to serializable format with additional details
+        serializable_assignments = []
+        for assignment in assignments:
+            # Get volunteer and project names
+            volunteer_data = routing_optimizer.volunteer_features[
+                routing_optimizer.volunteer_features['contact_id'] == assignment.volunteer_id
+            ].iloc[0] if not routing_optimizer.volunteer_features.empty else {}
+            
+            project_data = routing_optimizer.project_features[
+                routing_optimizer.project_features['project_id'] == assignment.project_id
+            ].iloc[0] if not routing_optimizer.project_features.empty else {}
+            
+            serializable_assignments.append({
+                "volunteer_id": assignment.volunteer_id,
+                "volunteer_name": f"{volunteer_data.get('first_name', '')} {volunteer_data.get('last_name', '')}".strip() or "Unknown",
+                "project_id": assignment.project_id,
+                "project_name": project_data.get('project_name', 'Unknown Project'),
+                "branch": assignment.branch,
+                "fit_score": float(assignment.fit_score),
+                "commitment_level": float(assignment.commitment_level),
+                "skills_match": float(assignment.skills_match),
+                "availability_match": float(assignment.availability_match),
+                "fit_category": "High" if assignment.fit_score >= 0.7 else "Medium" if assignment.fit_score >= 0.4 else "Low"
+            })
+        
+        # Sort by fit score (lowest first to highlight improvement opportunities)
+        serializable_assignments.sort(key=lambda x: x['fit_score'])
+        
+        return JSONResponse(content={
+            "assignments": serializable_assignments,
+            "total_assignments": len(assignments),
+            "statistics": {
+                "average_fit_score": np.mean([a.fit_score for a in assignments]) if assignments else 0,
+                "high_fit_count": len([a for a in assignments if a.fit_score >= 0.7]),
+                "medium_fit_count": len([a for a in assignments if 0.4 <= a.fit_score < 0.7]),
+                "low_fit_count": len([a for a in assignments if a.fit_score < 0.4])
+            },
+            "generated_at": datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        print(f"❌ Current assignments error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get current assignments")
+
 # Main web interface
 @app.get("/", response_class=HTMLResponse)
 async def main_interface():
@@ -716,6 +884,7 @@ async def main_interface():
           <h1>YMCA Volunteer PathFinder</h1>
           <p class=\"lead\">An AI assistant that helps you explore, understand, and navigate YMCA volunteer opportunities.</p>
           <a class=\"cta\" href=\"/chat\">Start Chat</a>
+          <a class=\"cta\" href=\"/routing\" style=\"background:#4f46e5;border-color:#4f46e5;margin-left:12px;\">Routing Optimizer</a>
         </section>
 
         <section class=\"section\">
@@ -736,6 +905,15 @@ async def main_interface():
                 <li><strong>Share preferences</strong> – interests, availability, location</li>
                 <li><strong>Get matches</strong> – personalized, with reasons and time commitments</li>
                 <li><strong>Onboard</strong> – step-by-step help to register and complete credentials</li>
+              </ul>
+            </div>
+            <div class=\"card\">
+              <h2>Routing Optimizer</h2>
+              <ul>
+                <li>Analyze current volunteer assignments and identify better fits</li>
+                <li>Generate swap suggestions to improve overall coverage</li>
+                <li>Optimize branch coverage and volunteer satisfaction</li>
+                <li>Data-driven insights for volunteer coordinators</li>
               </ul>
             </div>
             <div class=\"card\">
