@@ -1,6 +1,7 @@
 """
 ML-Powered Volunteer Matching Engine
 Uses scikit-learn models with existing volunteer data patterns
+Enhanced with fairness constraints for demographic balance
 """
 import pandas as pd
 import numpy as np
@@ -12,6 +13,7 @@ from sklearn.ensemble import RandomForestClassifier
 from typing import Dict, List, Tuple, Any, Optional
 import re
 from collections import Counter
+from fairness_constraints import FairnessConstraintsEngine
 
 class VolunteerMatchingEngine:
     def __init__(self, volunteer_data: Dict[str, Any]):
@@ -29,6 +31,9 @@ class VolunteerMatchingEngine:
         
         # Fitted models flags
         self.models_trained = False
+        
+        # Initialize fairness constraints engine
+        self.fairness_engine = FairnessConstraintsEngine(volunteer_data)
         
         # Volunteer types and characteristics
         self.volunteer_personas = {
@@ -193,8 +198,9 @@ class VolunteerMatchingEngine:
         self.models_trained = True
         print("✅ ML models trained successfully!")
     
-    def find_matches(self, user_preferences: Dict[str, Any], top_k: int = 5) -> List[Dict[str, Any]]:
-        """Find best volunteer matches for user preferences"""
+    def find_matches(self, user_preferences: Dict[str, Any], top_k: int = 5, 
+                   apply_fairness_constraints: bool = True) -> List[Dict[str, Any]]:
+        """Find best volunteer matches for user preferences with optional fairness constraints"""
         if not self.models_trained:
             self.train_models()
         
@@ -225,6 +231,12 @@ class VolunteerMatchingEngine:
         
         # Sort by score and return top matches
         match_scores.sort(key=lambda x: x['score'], reverse=True)
+        
+        # Apply fairness constraints if enabled
+        if apply_fairness_constraints:
+            user_demographics = self._extract_user_demographics(user_preferences)
+            match_scores = self.fairness_engine.apply_fairness_constraints(match_scores, user_demographics)
+            print("⚖️  Fairness constraints applied to matches")
         
         return match_scores[:top_k]
     
@@ -518,6 +530,48 @@ class VolunteerMatchingEngine:
             score += 0.1
         
         return min(score, 1.0)
+    
+    def _extract_user_demographics(self, user_preferences: Dict[str, Any]) -> Dict[str, Any]:
+        """Extract demographic information from user preferences"""
+        demographics = {}
+        
+        # Extract basic demographics
+        if 'age' in user_preferences:
+            demographics['age'] = user_preferences['age']
+        if 'gender' in user_preferences:
+            demographics['gender'] = user_preferences['gender']
+        if 'race_ethnicity' in user_preferences:
+            demographics['race_ethnicity'] = user_preferences['race_ethnicity']
+        if 'location' in user_preferences:
+            demographics['location'] = user_preferences['location']
+        
+        return demographics
+    
+    def get_fairness_report(self) -> Dict[str, Any]:
+        """Generate comprehensive fairness and equity report"""
+        return self.fairness_engine.generate_fairness_report()
+    
+    def analyze_demographic_balance(self, recommendations: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Analyze demographic balance in a set of recommendations"""
+        if not recommendations:
+            return {'message': 'No recommendations to analyze'}
+        
+        # Count recommendations by branch and category
+        branch_counts = Counter(rec.get('branch', 'Unknown') for rec in recommendations)
+        category_counts = Counter(rec.get('category', 'Unknown') for rec in recommendations)
+        
+        # Calculate diversity scores
+        branch_diversity = len(branch_counts) / len(self.fairness_engine.branches) if self.fairness_engine.branches else 0
+        category_diversity = len(category_counts) / 5  # Assume 5 main categories
+        
+        return {
+            'branch_distribution': dict(branch_counts),
+            'category_distribution': dict(category_counts),
+            'branch_diversity_score': min(1.0, branch_diversity),
+            'category_diversity_score': min(1.0, category_diversity),
+            'overall_diversity_score': (branch_diversity + category_diversity) / 2,
+            'fairness_adjustments_applied': any('fairness_adjusted_score' in rec for rec in recommendations)
+        }
 
 # Example usage
 if __name__ == "__main__":

@@ -397,9 +397,10 @@ async def chat_with_assistant(
 async def get_volunteer_matches(
     preferences: UserPreferences,
     user_id: Optional[str] = None,
-    background_tasks: BackgroundTasks = None
+    background_tasks: BackgroundTasks = None,
+    apply_fairness_constraints: bool = True
 ) -> JSONResponse:
-    """Get personalized volunteer recommendations"""
+    """Get personalized volunteer recommendations with fairness constraints"""
     
     if not matching_engine:
         raise HTTPException(status_code=503, detail="Matching service not available")
@@ -414,8 +415,15 @@ async def get_volunteer_matches(
             volunteer_data
         )
         
-        # Get ML-based matches
-        ml_matches = matching_engine.find_matches(preferences_dict, top_k=5)
+        # Get ML-based matches with fairness constraints
+        ml_matches = matching_engine.find_matches(
+            preferences_dict, 
+            top_k=5, 
+            apply_fairness_constraints=apply_fairness_constraints
+        )
+        
+        # Get demographic balance analysis
+        balance_analysis = matching_engine.analyze_demographic_balance(ml_matches)
         
         # Get success prediction
         success_prediction = matching_engine.predict_volunteer_success(preferences_dict)
@@ -427,9 +435,11 @@ async def get_volunteer_matches(
         result = {
             "ai_recommendations": ai_recommendations.get('recommendations', ''),
             "ml_matches": ml_matches,
+            "demographic_balance": balance_analysis,
             "success_prediction": success_prediction,
             "branch_recommendations": branch_recommendations,
             "insights": volunteer_data.get('insights', {}),
+            "fairness_applied": apply_fairness_constraints,
             "generated_at": datetime.now().isoformat()
         }
         
@@ -465,6 +475,101 @@ async def get_volunteer_matches(
     except Exception as e:
         print(f"❌ Matching error: {e}")
         raise HTTPException(status_code=500, detail="Matching service temporarily unavailable")
+
+# Fairness and equity reporting
+@app.get("/api/fairness/report")
+async def get_fairness_report() -> JSONResponse:
+    """Generate comprehensive fairness and equity report"""
+    
+    if not matching_engine:
+        raise HTTPException(status_code=503, detail="Matching service not available")
+    
+    try:
+        # Generate fairness report
+        fairness_report = matching_engine.get_fairness_report()
+        
+        # Add system metadata
+        report = {
+            "fairness_report": fairness_report,
+            "system_info": {
+                "total_volunteers": len(matching_engine.volunteers_df) if matching_engine.volunteers_df is not None else 0,
+                "total_projects": len(matching_engine.projects_df) if matching_engine.projects_df is not None else 0,
+                "fairness_constraints_enabled": True,
+                "report_generated_at": datetime.now().isoformat()
+            }
+        }
+        
+        return JSONResponse(content=report)
+        
+    except Exception as e:
+        print(f"❌ Fairness report error: {e}")
+        raise HTTPException(status_code=500, detail="Fairness reporting service temporarily unavailable")
+
+@app.post("/api/fairness/analyze")
+async def analyze_fairness_for_user(preferences: UserPreferences) -> JSONResponse:
+    """Analyze fairness implications for a specific user profile"""
+    
+    if not matching_engine:
+        raise HTTPException(status_code=503, detail="Matching service not available")
+    
+    try:
+        preferences_dict = preferences.dict()
+        
+        # Get matches with and without fairness constraints
+        matches_with_fairness = matching_engine.find_matches(
+            preferences_dict, top_k=10, apply_fairness_constraints=True
+        )
+        matches_without_fairness = matching_engine.find_matches(
+            preferences_dict, top_k=10, apply_fairness_constraints=False
+        )
+        
+        # Analyze the difference
+        balance_with_fairness = matching_engine.analyze_demographic_balance(matches_with_fairness)
+        balance_without_fairness = matching_engine.analyze_demographic_balance(matches_without_fairness)
+        
+        # Calculate fairness impact
+        fairness_impact = {
+            "score_adjustments": [
+                {
+                    "project": match.get('project_name'),
+                    "branch": match.get('branch'),
+                    "original_score": match.get('score', 0),
+                    "adjusted_score": match.get('fairness_adjusted_score', match.get('score', 0)),
+                    "adjustments": {
+                        "demographic_parity": match.get('demographic_parity_adjustment', 0),
+                        "branch_equity": match.get('branch_equity_adjustment', 0),
+                        "underrepresentation_boost": match.get('underrepresentation_boost', 0),
+                        "diversity_penalty": match.get('diversity_penalty', 0)
+                    }
+                }
+                for match in matches_with_fairness[:5]
+                if 'fairness_adjusted_score' in match
+            ],
+            "diversity_improvement": {
+                "branch_diversity": {
+                    "with_fairness": balance_with_fairness.get('branch_diversity_score', 0),
+                    "without_fairness": balance_without_fairness.get('branch_diversity_score', 0)
+                },
+                "category_diversity": {
+                    "with_fairness": balance_with_fairness.get('category_diversity_score', 0),
+                    "without_fairness": balance_without_fairness.get('category_diversity_score', 0)
+                }
+            }
+        }
+        
+        result = {
+            "user_demographics": matching_engine._extract_user_demographics(preferences_dict),
+            "fairness_impact": fairness_impact,
+            "matches_with_fairness": matches_with_fairness[:5],
+            "balance_analysis": balance_with_fairness,
+            "analysis_generated_at": datetime.now().isoformat()
+        }
+        
+        return JSONResponse(content=result)
+        
+    except Exception as e:
+        print(f"❌ Fairness analysis error: {e}")
+        raise HTTPException(status_code=500, detail="Fairness analysis service temporarily unavailable")
 
 # User management
 @app.post("/api/users")
@@ -673,6 +778,26 @@ async def get_resources() -> JSONResponse:
             "Special Events": "Fundraisers, community celebrations, holiday programs",
             "Facility Support": "Maintenance, organization, member services",
             "Administrative": "Office support, data entry, communications"
+        },
+        "fairness_features": {
+            "description": "AI-powered fairness constraints ensure equitable volunteer opportunity distribution",
+            "endpoints": {
+                "/api/fairness/report": "Comprehensive fairness and equity analysis",
+                "/api/fairness/analyze": "Personal fairness impact analysis for user profiles"
+            },
+            "features": [
+                "Demographic balance monitoring across gender, age, and ethnicity",
+                "Branch equity distribution to ensure geographic fairness",
+                "Underrepresentation boost for marginalized communities",
+                "Diversity scoring and recommendation balancing",
+                "Transparent fairness reporting and analytics"
+            ],
+            "benefits": [
+                "Prevents discrimination in volunteer matching",
+                "Promotes inclusive opportunity distribution",
+                "Ensures balanced representation across all branches",
+                "Maintains matching quality while improving equity"
+            ]
         }
     }
     
