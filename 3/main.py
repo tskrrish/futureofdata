@@ -13,6 +13,7 @@ import asyncio
 from datetime import datetime
 import os
 import pandas as pd
+import logging
 
 # Import our modules
 from config import settings
@@ -20,6 +21,11 @@ from ai_assistant import VolunteerAIAssistant
 from matching_engine import VolunteerMatchingEngine
 from data_processor import VolunteerDataProcessor
 from database import VolunteerDatabase
+from kpi_email_service import KPIEmailService
+from kpi_scheduler import KPIScheduler, start_kpi_scheduler, stop_kpi_scheduler
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -43,6 +49,8 @@ ai_assistant = VolunteerAIAssistant()
 database = VolunteerDatabase()
 volunteer_data = None
 matching_engine = None
+kpi_email_service = None
+kpi_scheduler = None
 
 # Pydantic models
 class UserProfile(BaseModel):
@@ -78,11 +86,30 @@ class FeedbackData(BaseModel):
     feedback_text: str = ""
     feedback_type: str = "general"
 
+class StakeholderRequest(BaseModel):
+    email: str
+    name: str
+    role: str
+    report_frequency: str  # daily, weekly, monthly
+    branches: List[str] = ["all"]
+    active: bool = True
+
+class KPIReportRequest(BaseModel):
+    period: str = "current_month"  # current_month, last_month, current_week, last_week
+    branch_filter: str = "All"
+    
+class ScheduleJobRequest(BaseModel):
+    job_id: str
+    frequency: str  # daily, weekly, monthly
+    time: str  # "09:00" format
+    timezone: str = "US/Eastern"
+    active: bool = True
+
 # Initialize data on startup
 @app.on_event("startup")
 async def startup_event():
     """Initialize application data and models"""
-    global volunteer_data, matching_engine
+    global volunteer_data, matching_engine, kpi_email_service, kpi_scheduler
     
     print("🚀 Starting Volunteer PathFinder AI Assistant...")
     
@@ -111,7 +138,37 @@ async def startup_event():
     except Exception as e:
         print(f"❌ Error loading volunteer data: {e}")
     
+    # Initialize KPI Email Service
+    try:
+        if volunteer_data:
+            processor = VolunteerDataProcessor(settings.VOLUNTEER_DATA_PATH)
+            kpi_email_service = KPIEmailService(database, processor)
+            print("✅ KPI Email Service initialized")
+            
+            # Initialize and start KPI Scheduler
+            kpi_scheduler = KPIScheduler(kpi_email_service)
+            kpi_scheduler.start_scheduler()
+            print("✅ KPI Scheduler started")
+        else:
+            print("⚠️  KPI services not started - volunteer data not available")
+    except Exception as e:
+        print(f"⚠️  KPI services initialization note: {e}")
+    
     print("🎉 Volunteer PathFinder AI Assistant is ready!")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Clean shutdown of services"""
+    global kpi_scheduler
+    
+    print("🛑 Shutting down Volunteer PathFinder AI Assistant...")
+    
+    # Stop KPI scheduler
+    if kpi_scheduler:
+        kpi_scheduler.stop_scheduler()
+        print("✅ KPI Scheduler stopped")
+    
+    print("✅ Shutdown complete")
 
 @app.post("/api/reset")
 async def reset_context() -> JSONResponse:
@@ -130,7 +187,9 @@ async def health_check():
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
         "data_loaded": volunteer_data is not None,
-        "models_ready": matching_engine is not None and matching_engine.models_trained
+        "models_ready": matching_engine is not None and matching_engine.models_trained,
+        "kpi_service_ready": kpi_email_service is not None,
+        "kpi_scheduler_running": kpi_scheduler is not None and kpi_scheduler.running
     }
 
 # Serve static files (for web interface)
@@ -677,6 +736,198 @@ async def get_resources() -> JSONResponse:
     }
     
     return JSONResponse(content=resources)
+
+# KPI Email Report Endpoints
+@app.post("/api/kpi/generate-report")
+async def generate_kpi_report(request: KPIReportRequest) -> JSONResponse:
+    """Generate KPI report snapshot"""
+    
+    if not kpi_email_service:
+        raise HTTPException(status_code=503, detail="KPI service not available")
+    
+    try:
+        kpi_snapshot = await kpi_email_service.generate_kpi_snapshot(
+            period=request.period,
+            branch_filter=request.branch_filter
+        )
+        
+        return JSONResponse(content=kpi_snapshot.__dict__)
+        
+    except Exception as e:
+        logger.error(f"Error generating KPI report: {e}")
+        raise HTTPException(status_code=500, detail="Failed to generate KPI report")
+
+@app.post("/api/kpi/send-reports/{frequency}")
+async def send_scheduled_reports(frequency: str) -> JSONResponse:
+    """Send KPI reports to all stakeholders with matching frequency"""
+    
+    if not kpi_email_service:
+        raise HTTPException(status_code=503, detail="KPI service not available")
+    
+    if frequency not in ["daily", "weekly", "monthly"]:
+        raise HTTPException(status_code=400, detail="Invalid frequency. Must be daily, weekly, or monthly")
+    
+    try:
+        result = await kpi_email_service.send_scheduled_reports(frequency)
+        return JSONResponse(content=result)
+        
+    except Exception as e:
+        logger.error(f"Error sending scheduled reports: {e}")
+        raise HTTPException(status_code=500, detail="Failed to send reports")
+
+@app.get("/api/kpi/stakeholders")
+async def get_stakeholders() -> JSONResponse:
+    """Get all stakeholder configurations"""
+    
+    if not kpi_email_service:
+        raise HTTPException(status_code=503, detail="KPI service not available")
+    
+    stakeholders = kpi_email_service.get_stakeholders()
+    return JSONResponse(content={"stakeholders": stakeholders})
+
+@app.post("/api/kpi/stakeholders")
+async def add_stakeholder(stakeholder: StakeholderRequest) -> JSONResponse:
+    """Add new stakeholder configuration"""
+    
+    if not kpi_email_service:
+        raise HTTPException(status_code=503, detail="KPI service not available")
+    
+    try:
+        success = await kpi_email_service.add_stakeholder(stakeholder.dict())
+        
+        if success:
+            return JSONResponse(content={"success": True, "message": "Stakeholder added successfully"})
+        else:
+            raise HTTPException(status_code=400, detail="Failed to add stakeholder")
+            
+    except Exception as e:
+        logger.error(f"Error adding stakeholder: {e}")
+        raise HTTPException(status_code=500, detail="Failed to add stakeholder")
+
+@app.put("/api/kpi/stakeholders/{email}")
+async def update_stakeholder(email: str, updates: dict) -> JSONResponse:
+    """Update stakeholder configuration"""
+    
+    if not kpi_email_service:
+        raise HTTPException(status_code=503, detail="KPI service not available")
+    
+    try:
+        success = await kpi_email_service.update_stakeholder(email, updates)
+        
+        if success:
+            return JSONResponse(content={"success": True, "message": "Stakeholder updated successfully"})
+        else:
+            raise HTTPException(status_code=404, detail="Stakeholder not found")
+            
+    except Exception as e:
+        logger.error(f"Error updating stakeholder: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update stakeholder")
+
+@app.get("/api/kpi/scheduler/status")
+async def get_scheduler_status() -> JSONResponse:
+    """Get status of all scheduled jobs"""
+    
+    if not kpi_scheduler:
+        raise HTTPException(status_code=503, detail="Scheduler not available")
+    
+    job_status = kpi_scheduler.get_job_status()
+    next_runs = kpi_scheduler.get_next_runs()
+    
+    return JSONResponse(content={
+        "running": kpi_scheduler.running,
+        "jobs": job_status,
+        "next_runs": next_runs
+    })
+
+@app.post("/api/kpi/scheduler/jobs")
+async def add_scheduled_job(job: ScheduleJobRequest) -> JSONResponse:
+    """Add new scheduled job"""
+    
+    if not kpi_scheduler:
+        raise HTTPException(status_code=503, detail="Scheduler not available")
+    
+    try:
+        success = kpi_scheduler.add_job(job.dict())
+        
+        if success:
+            return JSONResponse(content={"success": True, "message": "Job added successfully"})
+        else:
+            raise HTTPException(status_code=400, detail="Failed to add job")
+            
+    except Exception as e:
+        logger.error(f"Error adding scheduled job: {e}")
+        raise HTTPException(status_code=500, detail="Failed to add job")
+
+@app.put("/api/kpi/scheduler/jobs/{job_id}")
+async def update_scheduled_job(job_id: str, updates: dict) -> JSONResponse:
+    """Update scheduled job"""
+    
+    if not kpi_scheduler:
+        raise HTTPException(status_code=503, detail="Scheduler not available")
+    
+    try:
+        success = kpi_scheduler.update_job(job_id, updates)
+        
+        if success:
+            return JSONResponse(content={"success": True, "message": "Job updated successfully"})
+        else:
+            raise HTTPException(status_code=404, detail="Job not found")
+            
+    except Exception as e:
+        logger.error(f"Error updating scheduled job: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update job")
+
+@app.delete("/api/kpi/scheduler/jobs/{job_id}")
+async def delete_scheduled_job(job_id: str) -> JSONResponse:
+    """Delete scheduled job"""
+    
+    if not kpi_scheduler:
+        raise HTTPException(status_code=503, detail="Scheduler not available")
+    
+    try:
+        success = kpi_scheduler.delete_job(job_id)
+        
+        if success:
+            return JSONResponse(content={"success": True, "message": "Job deleted successfully"})
+        else:
+            raise HTTPException(status_code=404, detail="Job not found")
+            
+    except Exception as e:
+        logger.error(f"Error deleting scheduled job: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete job")
+
+@app.post("/api/kpi/scheduler/jobs/{job_id}/run")
+async def run_job_immediately(job_id: str) -> JSONResponse:
+    """Run a specific job immediately"""
+    
+    if not kpi_scheduler:
+        raise HTTPException(status_code=503, detail="Scheduler not available")
+    
+    try:
+        result = await kpi_scheduler.run_job_immediately(job_id)
+        return JSONResponse(content=result)
+        
+    except Exception as e:
+        logger.error(f"Error running job immediately: {e}")
+        raise HTTPException(status_code=500, detail="Failed to run job")
+
+@app.post("/api/kpi/scheduler/frequency/{frequency}/run")
+async def run_frequency_immediately(frequency: str) -> JSONResponse:
+    """Run all jobs of a specific frequency immediately"""
+    
+    if not kpi_scheduler:
+        raise HTTPException(status_code=503, detail="Scheduler not available")
+    
+    if frequency not in ["daily", "weekly", "monthly"]:
+        raise HTTPException(status_code=400, detail="Invalid frequency. Must be daily, weekly, or monthly")
+    
+    try:
+        result = await kpi_scheduler.run_frequency_immediately(frequency)
+        return JSONResponse(content=result)
+        
+    except Exception as e:
+        logger.error(f"Error running frequency immediately: {e}")
+        raise HTTPException(status_code=500, detail="Failed to run frequency")
 
 # Main web interface
 @app.get("/", response_class=HTMLResponse)
