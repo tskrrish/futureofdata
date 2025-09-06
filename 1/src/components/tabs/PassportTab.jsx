@@ -1,13 +1,43 @@
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, Download } from "lucide-react";
+import { useState } from "react";
+import { exportMultipleVolunteersPDF, exportVolunteerPassportPDF } from "../../utils/pdfExport.js";
+import { useVolunteerData } from "../../hooks/useVolunteerData.js";
 
 export function PassportTab() {
+  const { volunteers } = useVolunteerData();
+  const [isExporting, setIsExporting] = useState(false);
+
+  const handleExportAll = async () => {
+    if (!volunteers || volunteers.length === 0) return;
+    
+    setIsExporting(true);
+    try {
+      await exportMultipleVolunteersPDF(volunteers);
+    } catch (error) {
+      console.error('Export failed:', error);
+      alert('Failed to export PDF. Please try again.');
+    } finally {
+      setIsExporting(false);
+    }
+  };
+
   return (
     <div className="rounded-2xl border bg-white p-4 mt-4 space-y-4">
       <div className="flex items-center justify-between">
         <h3 className="font-semibold">Belonging Passport — Growth Pathways</h3>
-        <button className="inline-flex items-center gap-2 rounded-xl border px-3 py-1.5 text-sm hover:bg-neutral-50">
-          Open App <ArrowRight className="w-4 h-4" />
-        </button>
+        <div className="flex gap-2">
+          <button 
+            className="inline-flex items-center gap-2 rounded-xl border px-3 py-1.5 text-sm hover:bg-neutral-50"
+            onClick={handleExportAll}
+            disabled={isExporting || !volunteers?.length}
+          >
+            <Download className="w-4 h-4" />
+            {isExporting ? 'Generating PDF...' : 'Export All Passports'}
+          </button>
+          <button className="inline-flex items-center gap-2 rounded-xl border px-3 py-1.5 text-sm hover:bg-neutral-50">
+            Open App <ArrowRight className="w-4 h-4" />
+          </button>
+        </div>
       </div>
       <p className="text-sm text-neutral-600">
         Recognize contributions and create belonging pathways. Earn badges at 10/25/50/100 hours, unlock roles

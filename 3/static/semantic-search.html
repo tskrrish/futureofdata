@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Semantic Search - YMCA Volunteer PathFinder</title>
+    <style>
+        :root {
+            --bg: #ffffff;
+            --fg: #111111;
+            --muted: #6b7280;
+            --border: #e5e7eb;
+            --accent: #0f172a;
+            --success: #059669;
+            --error: #dc2626;
+            --blue: #2563eb;
+        }
+
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--fg);
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+            padding: 20px;
+            border-bottom: 2px solid var(--border);
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            color: var(--accent);
+        }
+
+        .header p {
+            color: var(--muted);
+            font-size: 1.1rem;
+        }
+
+        .search-container {
+            background: #f9fafb;
+            padding: 30px;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            margin-bottom: 40px;
+        }
+
+        .search-form {
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        label {
+            font-weight: 600;
+            color: var(--accent);
+        }
+
+        input[type="text"], select {
+            padding: 12px;
+            border: 2px solid var(--border);
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.2s;
+        }
+
+        input[type="text"]:focus, select:focus {
+            outline: none;
+            border-color: var(--blue);
+        }
+
+        .search-controls {
+            display: grid;
+            grid-template-columns: 1fr auto auto;
+            gap: 15px;
+            align-items: end;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            background: var(--accent);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn:hover {
+            background: var(--blue);
+            transform: translateY(-1px);
+        }
+
+        .btn:disabled {
+            background: var(--muted);
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .suggestions {
+            background: white;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            margin-top: 5px;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+            display: none;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .suggestion {
+            padding: 10px;
+            cursor: pointer;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .suggestion:hover {
+            background: #f3f4f6;
+        }
+
+        .suggestion:last-child {
+            border-bottom: none;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 40px;
+            color: var(--muted);
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid var(--border);
+            border-radius: 50%;
+            border-top-color: var(--blue);
+            animation: spin 1s ease-in-out infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .results {
+            display: grid;
+            gap: 40px;
+        }
+
+        .results-section h2 {
+            font-size: 1.5rem;
+            margin-bottom: 20px;
+            color: var(--accent);
+            border-bottom: 2px solid var(--border);
+            padding-bottom: 10px;
+        }
+
+        .results-grid {
+            display: grid;
+            gap: 20px;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+        }
+
+        .result-card {
+            background: white;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 20px;
+            transition: all 0.2s;
+            position: relative;
+        }
+
+        .result-card:hover {
+            box-shadow: 0 8px 25px -5px rgb(0 0 0 / 0.1);
+            transform: translateY(-2px);
+        }
+
+        .result-header {
+            display: flex;
+            justify-content: between;
+            align-items: flex-start;
+            margin-bottom: 15px;
+        }
+
+        .result-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: var(--accent);
+            margin-bottom: 5px;
+        }
+
+        .similarity-score {
+            background: var(--blue);
+            color: white;
+            padding: 4px 8px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            position: absolute;
+            top: 15px;
+            right: 15px;
+        }
+
+        .result-meta {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 15px;
+            color: var(--muted);
+            font-size: 0.9rem;
+        }
+
+        .result-meta span {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .result-description {
+            color: var(--fg);
+            margin-bottom: 15px;
+            line-height: 1.5;
+        }
+
+        .tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .tag {
+            background: #f3f4f6;
+            color: var(--accent);
+            padding: 4px 10px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            border: 1px solid var(--border);
+        }
+
+        .no-results {
+            text-align: center;
+            padding: 40px;
+            color: var(--muted);
+        }
+
+        .error {
+            background: #fef2f2;
+            color: var(--error);
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #fecaca;
+            margin-top: 20px;
+        }
+
+        .stats {
+            background: #f9fafb;
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            margin-top: 30px;
+        }
+
+        .stats h3 {
+            margin-bottom: 10px;
+            color: var(--accent);
+        }
+
+        @media (max-width: 768px) {
+            .search-controls {
+                grid-template-columns: 1fr;
+            }
+            
+            .results-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .header h1 {
+                font-size: 2rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🔍 Semantic Search</h1>
+            <p>Find people and opportunities by meaning - search naturally and discover connections</p>
+        </div>
+
+        <div class="search-container">
+            <div class="search-form">
+                <div class="form-group">
+                    <label for="searchQuery">Search Query</label>
+                    <div style="position: relative;">
+                        <input 
+                            type="text" 
+                            id="searchQuery" 
+                            placeholder="e.g., 'experienced youth mentors', 'fitness coaching opportunities', 'volunteers who work with seniors'"
+                            autocomplete="off"
+                        >
+                        <div id="suggestions" class="suggestions"></div>
+                    </div>
+                </div>
+                
+                <div class="search-controls">
+                    <div class="form-group">
+                        <label for="searchType">Search Type</label>
+                        <select id="searchType">
+                            <option value="combined">Both Volunteers & Opportunities</option>
+                            <option value="volunteers">Volunteers Only</option>
+                            <option value="opportunities">Opportunities Only</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="maxResults">Max Results</label>
+                        <select id="maxResults">
+                            <option value="5">5</option>
+                            <option value="10" selected>10</option>
+                            <option value="20">20</option>
+                            <option value="50">50</option>
+                        </select>
+                    </div>
+                    
+                    <button id="searchBtn" class="btn" onclick="performSearch()">
+                        <span>🔍</span> Search
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div id="loadingIndicator" class="loading" style="display: none;">
+            <div class="spinner"></div>
+            <p>Searching for the best matches...</p>
+        </div>
+
+        <div id="errorMessage" class="error" style="display: none;"></div>
+
+        <div id="results" class="results"></div>
+
+        <div id="searchStats" class="stats" style="display: none;">
+            <h3>Search Statistics</h3>
+            <div id="statsContent"></div>
+        </div>
+    </div>
+
+    <script>
+        let searchTimeout;
+        let currentQuery = '';
+
+        // Initialize page
+        document.addEventListener('DOMContentLoaded', function() {
+            const searchInput = document.getElementById('searchQuery');
+            const suggestionsDiv = document.getElementById('suggestions');
+            
+            // Handle search suggestions
+            searchInput.addEventListener('input', function(e) {
+                const query = e.target.value.trim();
+                
+                if (query.length > 2) {
+                    clearTimeout(searchTimeout);
+                    searchTimeout = setTimeout(() => {
+                        fetchSuggestions(query);
+                    }, 300);
+                } else {
+                    suggestionsDiv.style.display = 'none';
+                }
+            });
+
+            // Handle enter key
+            searchInput.addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    performSearch();
+                }
+            });
+
+            // Hide suggestions when clicking outside
+            document.addEventListener('click', function(e) {
+                if (!searchInput.contains(e.target) && !suggestionsDiv.contains(e.target)) {
+                    suggestionsDiv.style.display = 'none';
+                }
+            });
+
+            // Load initial stats
+            loadSearchStats();
+        });
+
+        async function fetchSuggestions(query) {
+            try {
+                const response = await fetch(`/api/semantic-search/suggestions?q=${encodeURIComponent(query)}`);
+                const data = await response.json();
+                
+                const suggestionsDiv = document.getElementById('suggestions');
+                
+                if (data.suggestions && data.suggestions.length > 0) {
+                    suggestionsDiv.innerHTML = data.suggestions
+                        .map(suggestion => `<div class="suggestion" onclick="selectSuggestion('${suggestion}')">${suggestion}</div>`)
+                        .join('');
+                    suggestionsDiv.style.display = 'block';
+                } else {
+                    suggestionsDiv.style.display = 'none';
+                }
+            } catch (error) {
+                console.error('Error fetching suggestions:', error);
+            }
+        }
+
+        function selectSuggestion(suggestion) {
+            document.getElementById('searchQuery').value = suggestion;
+            document.getElementById('suggestions').style.display = 'none';
+            performSearch();
+        }
+
+        async function performSearch() {
+            const query = document.getElementById('searchQuery').value.trim();
+            const searchType = document.getElementById('searchType').value;
+            const maxResults = parseInt(document.getElementById('maxResults').value);
+
+            if (!query) {
+                showError('Please enter a search query');
+                return;
+            }
+
+            showLoading();
+            hideError();
+            currentQuery = query;
+
+            try {
+                const response = await fetch('/api/semantic-search', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        query: query,
+                        search_type: searchType,
+                        max_results: maxResults
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const data = await response.json();
+                displayResults(data);
+            } catch (error) {
+                console.error('Search error:', error);
+                showError('Search failed. Please check if the semantic search service is available.');
+            } finally {
+                hideLoading();
+            }
+        }
+
+        function displayResults(data) {
+            const resultsDiv = document.getElementById('results');
+            
+            if ((!data.volunteers || data.volunteers.length === 0) && 
+                (!data.opportunities || data.opportunities.length === 0)) {
+                resultsDiv.innerHTML = `
+                    <div class="no-results">
+                        <h3>No results found</h3>
+                        <p>Try adjusting your search terms or using different keywords.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            let html = '';
+
+            // Display volunteers
+            if (data.volunteers && data.volunteers.length > 0) {
+                html += `
+                    <div class="results-section">
+                        <h2>👥 Volunteers (${data.volunteers.length})</h2>
+                        <div class="results-grid">
+                `;
+                
+                data.volunteers.forEach(volunteer => {
+                    const score = (volunteer.similarity_score * 100).toFixed(1);
+                    html += `
+                        <div class="result-card">
+                            <div class="similarity-score">${score}%</div>
+                            <div class="result-title">${volunteer.name || 'Anonymous'}</div>
+                            <div class="result-meta">
+                                ${volunteer.age ? `<span>📅 Age ${volunteer.age}</span>` : ''}
+                                ${volunteer.branch ? `<span>📍 ${volunteer.branch}</span>` : ''}
+                                ${volunteer.hours ? `<span>⏰ ${volunteer.hours} hours</span>` : ''}
+                            </div>
+                            <div class="result-description">
+                                ${volunteer.search_text || 'Volunteer profile information not available'}
+                            </div>
+                            <div class="tags">
+                                ${volunteer.volunteer_type ? `<span class="tag">${volunteer.volunteer_type}</span>` : ''}
+                                ${volunteer.experience ? `<span class="tag">${volunteer.experience}</span>` : ''}
+                                ${volunteer.gender ? `<span class="tag">${volunteer.gender}</span>` : ''}
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                html += '</div></div>';
+            }
+
+            // Display opportunities
+            if (data.opportunities && data.opportunities.length > 0) {
+                html += `
+                    <div class="results-section">
+                        <h2>🎯 Opportunities (${data.opportunities.length})</h2>
+                        <div class="results-grid">
+                `;
+                
+                data.opportunities.forEach(opportunity => {
+                    const score = (opportunity.similarity_score * 100).toFixed(1);
+                    html += `
+                        <div class="result-card">
+                            <div class="similarity-score">${score}%</div>
+                            <div class="result-title">${opportunity.name || 'Volunteer Opportunity'}</div>
+                            <div class="result-meta">
+                                ${opportunity.category ? `<span>📂 ${opportunity.category}</span>` : ''}
+                                ${opportunity.branch ? `<span>📍 ${opportunity.branch}</span>` : ''}
+                                ${opportunity.time_commitment ? `<span>⏰ ${opportunity.time_commitment}</span>` : ''}
+                            </div>
+                            <div class="result-description">
+                                ${opportunity.description || 'Opportunity description not available'}
+                            </div>
+                            <div class="tags">
+                                ${opportunity.category ? `<span class="tag">${opportunity.category}</span>` : ''}
+                                ${opportunity.skills_needed ? `<span class="tag">Skills: ${opportunity.skills_needed}</span>` : ''}
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                html += '</div></div>';
+            }
+
+            resultsDiv.innerHTML = html;
+        }
+
+        function showLoading() {
+            document.getElementById('loadingIndicator').style.display = 'block';
+            document.getElementById('searchBtn').disabled = true;
+        }
+
+        function hideLoading() {
+            document.getElementById('loadingIndicator').style.display = 'none';
+            document.getElementById('searchBtn').disabled = false;
+        }
+
+        function showError(message) {
+            const errorDiv = document.getElementById('errorMessage');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+        }
+
+        function hideError() {
+            document.getElementById('errorMessage').style.display = 'none';
+        }
+
+        async function loadSearchStats() {
+            try {
+                const response = await fetch('/api/semantic-search/stats');
+                const stats = await response.json();
+                
+                if (stats.initialized) {
+                    const statsDiv = document.getElementById('searchStats');
+                    const contentDiv = document.getElementById('statsContent');
+                    
+                    contentDiv.innerHTML = `
+                        <p><strong>Model:</strong> ${stats.model_name}</p>
+                        <p><strong>Volunteers:</strong> ${stats.volunteer_count.toLocaleString()}</p>
+                        <p><strong>Opportunities:</strong> ${stats.opportunity_count.toLocaleString()}</p>
+                        <p><strong>Embedding Dimensions:</strong> ${stats.embedding_dimensions}</p>
+                        <p><strong>Cache Status:</strong> ${stats.cache_files_exist.volunteers ? '✅' : '❌'} Volunteers | ${stats.cache_files_exist.projects ? '✅' : '❌'} Projects</p>
+                    `;
+                    
+                    statsDiv.style.display = 'block';
+                }
+            } catch (error) {
+                console.error('Error loading stats:', error);
+            }
+        }
+    </script>
+</body>
+</html>
