@@ -23,10 +23,7 @@ from ai_assistant import VolunteerAIAssistant
 from matching_engine import VolunteerMatchingEngine
 from data_processor import VolunteerDataProcessor
 from database import VolunteerDatabase
-from rbac_api import create_rbac_router
-from rbac_middleware import create_rbac_middleware
-from rbac_models import RBACService
-
+\
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -52,9 +49,7 @@ retention_manager = None
 retention_scheduler = None
 volunteer_data = None
 matching_engine = None
-rbac_middleware = None
-rbac_dependency = None
-rbac_service = None
+
 
 # Pydantic models
 class UserProfile(BaseModel):
@@ -107,7 +102,6 @@ async def startup_event():
         print(f"⚠️  Database initialization note: {e}")
     
 
-    
     # Load and process volunteer data
     try:
         if os.path.exists(settings.VOLUNTEER_DATA_PATH):
@@ -740,6 +734,7 @@ async def get_resources() -> JSONResponse:
     }
     
     return JSONResponse(content=resources)
+
 
 
 # Main web interface
