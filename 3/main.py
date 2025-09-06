@@ -2,7 +2,7 @@
 Main FastAPI application for Volunteer PathFinder AI Assistant
 Brings together AI, matching engine, and database
 """
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
@@ -13,6 +13,10 @@ import asyncio
 from datetime import datetime
 import os
 import pandas as pd
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 # Import our modules
 from config import settings
@@ -29,6 +33,7 @@ from contextual_tone_analyzer import (
     CommunicationStyle, ResponsivenessLevel
 )
 from message_templates import MessageTemplateEngine
+
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -50,11 +55,10 @@ app.add_middleware(
 # Global instances
 ai_assistant = VolunteerAIAssistant()
 database = VolunteerDatabase()
+
 volunteer_data = None
 matching_engine = None
-drafting_engine = None
-tone_analyzer = None
-template_engine = None
+
 
 # Pydantic models
 class UserProfile(BaseModel):
@@ -90,47 +94,13 @@ class FeedbackData(BaseModel):
     feedback_text: str = ""
     feedback_type: str = "general"
 
-# Email/SMS Drafting Models
-class MessageDraftRequest(BaseModel):
-    contact_id: Optional[str] = None
-    name: Optional[str] = None
-    purpose: str  # OutreachPurpose enum value
-    message_type: str  # MessageType enum value  
-    tone: Optional[str] = None  # MessageTone enum value, auto-detected if not provided
-    urgency_level: int = 1  # 1=low, 2=medium, 3=high
-    custom_instructions: Optional[str] = None
-    event_details: Optional[Dict[str, Any]] = None
-    volunteer_opportunity: Optional[Dict[str, Any]] = None
-    template_id: Optional[str] = None  # Use specific template if provided
 
-class ToneAnalysisRequest(BaseModel):
-    contact_id: Optional[str] = None
-    name: Optional[str] = None
-    message_purpose: str  # OutreachPurpose enum value
-    interaction_history: Optional[List[Dict]] = None
-
-class MessageVariantsRequest(BaseModel):
-    contact_id: Optional[str] = None
-    name: Optional[str] = None
-    purpose: str  # OutreachPurpose enum value
-    message_type: str  # MessageType enum value
-    num_variants: int = 3
-    custom_instructions: Optional[str] = None
-    event_details: Optional[Dict[str, Any]] = None
-    volunteer_opportunity: Optional[Dict[str, Any]] = None
-
-class TemplateRenderRequest(BaseModel):
-    template_id: str
-    contact_id: Optional[str] = None
-    name: Optional[str] = None
-    custom_variables: Optional[Dict[str, str]] = None
-    context_data: Optional[Dict[str, Any]] = None
 
 # Initialize data on startup
 @app.on_event("startup")
 async def startup_event():
     """Initialize application data and models"""
-    global volunteer_data, matching_engine, drafting_engine, tone_analyzer, template_engine
+
     
     print("🚀 Starting Volunteer PathFinder AI Assistant...")
     
@@ -141,6 +111,7 @@ async def startup_event():
     except Exception as e:
         print(f"⚠️  Database initialization note: {e}")
     
+
     # Load and process volunteer data
     try:
         if os.path.exists(settings.VOLUNTEER_DATA_PATH):
@@ -158,6 +129,7 @@ async def startup_event():
             print(f"⚠️  Volunteer data file not found: {settings.VOLUNTEER_DATA_PATH}")
     except Exception as e:
         print(f"❌ Error loading volunteer data: {e}")
+
     
     # Initialize email/SMS drafting components
     try:
@@ -170,6 +142,8 @@ async def startup_event():
         print(f"❌ Error initializing drafting engine: {e}")
     
     print("🎉 Volunteer PathFinder AI Assistant is ready!")
+    
+
 
 @app.post("/api/reset")
 async def reset_context() -> JSONResponse:
@@ -191,9 +165,110 @@ async def health_check():
         "models_ready": matching_engine is not None and matching_engine.models_trained
     }
 
+# SSO Authentication Routes
+@app.get("/auth/google")
+async def google_login():
+    """Initiate Google OAuth login"""
+    auth_url = sso_auth.get_google_auth_url()
+    return {"auth_url": auth_url}
+
+@app.get("/auth/microsoft")
+async def microsoft_login():
+    """Initiate Microsoft OAuth login"""
+    auth_url = sso_auth.get_microsoft_auth_url()
+    return {"auth_url": auth_url}
+
+@app.get("/auth/callback/google")
+async def google_callback(request: Request):
+    """Handle Google OAuth callback"""
+    try:
+        result = await sso_auth.handle_google_callback(request)
+        # Return HTML page that handles the token storage and redirect
+        return HTMLResponse(f"""
+        <!doctype html>
+        <html>
+        <head><title>Authentication Complete</title></head>
+        <body>
+          <script>
+            localStorage.setItem('auth_token', '{result["access_token"]}');
+            localStorage.setItem('user', '{json.dumps(result["user"])}');
+            localStorage.setItem('auth_provider', '{result["provider"]}');
+            window.location.href = '/chat';
+          </script>
+        </body>
+        </html>
+        """)
+    except HTTPException as e:
+        return HTMLResponse(f"""
+        <!doctype html>
+        <html>
+        <head><title>Authentication Error</title></head>
+        <body>
+          <script>
+            alert('Authentication failed: {e.detail}');
+            window.location.href = '/login';
+          </script>
+        </body>
+        </html>
+        """, status_code=e.status_code)
+
+@app.get("/auth/callback/microsoft")
+async def microsoft_callback(request: Request):
+    """Handle Microsoft OAuth callback"""
+    try:
+        result = await sso_auth.handle_microsoft_callback(request)
+        # Return HTML page that handles the token storage and redirect
+        return HTMLResponse(f"""
+        <!doctype html>
+        <html>
+        <head><title>Authentication Complete</title></head>
+        <body>
+          <script>
+            localStorage.setItem('auth_token', '{result["access_token"]}');
+            localStorage.setItem('user', '{json.dumps(result["user"])}');
+            localStorage.setItem('auth_provider', '{result["provider"]}');
+            window.location.href = '/chat';
+          </script>
+        </body>
+        </html>
+        """)
+    except HTTPException as e:
+        return HTMLResponse(f"""
+        <!doctype html>
+        <html>
+        <head><title>Authentication Error</title></head>
+        <body>
+          <script>
+            alert('Authentication failed: {e.detail}');
+            window.location.href = '/login';
+          </script>
+        </body>
+        </html>
+        """, status_code=e.status_code)
+
+@app.get("/auth/me")
+async def get_current_user_info(user = Depends(lambda: get_current_user_optional(database))):
+    """Get current user information"""
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    return {"user": user}
+
+@app.post("/auth/logout")
+async def logout():
+    """Logout endpoint (client-side token removal)"""
+    return {"message": "Logged out successfully", "note": "Remove token from client storage"}
+
 # Serve static files (for web interface)
 if os.path.exists("static"):
     app.mount("/static", StaticFiles(directory="static"), name="static")
+
+# Serve login page
+@app.get("/login", response_class=HTMLResponse)
+async def login_page():
+    file_path = os.path.join(os.path.dirname(__file__), "static", "login.html")
+    if os.path.exists(file_path):
+        return FileResponse(file_path)
+    return HTMLResponse("<h3>Login page not found</h3>", status_code=404)
 
 # Serve chat UI directly
 @app.get("/chat", response_class=HTMLResponse)
@@ -202,6 +277,14 @@ async def chat_page():
     if os.path.exists(file_path):
         return FileResponse(file_path)
     return HTMLResponse("<h3>Chat UI not found. Create static/chat.html</h3>", status_code=404)
+
+# Serve templates UI
+@app.get("/templates", response_class=HTMLResponse)
+async def templates_page():
+    file_path = os.path.join(os.path.dirname(__file__), "static", "templates.html")
+    if os.path.exists(file_path):
+        return FileResponse(file_path)
+    return HTMLResponse("<h3>Templates UI not found.</h3>", status_code=404)
 
 class ProfileRequest(BaseModel):
     name: str
@@ -250,7 +333,7 @@ def _derive_preferences_from_history(history_df: pd.DataFrame) -> dict:
     return preferences
 
 @app.post("/api/profile")
-async def get_profile_analysis(req: ProfileRequest) -> JSONResponse:
+async def get_profile_analysis(req: ProfileRequest, request: Request) -> JSONResponse:
     """Analyze a volunteer's profile by their name from the Excel dataset and suggest matches."""
     if volunteer_data is None:
         raise HTTPException(status_code=503, detail="Volunteer data not loaded")
@@ -400,18 +483,35 @@ async def get_profile_analysis(req: ProfileRequest) -> JSONResponse:
         "recommendations": recs,
         "summary": "\n".join(summary_lines)
     }
-    # Save context for subsequent AI chats
+    # Apply PII redaction based on user context
+    try:
+        user_context = get_user_context_from_request(request)
+        # Apply PII masking to the profile payload
+        masked_payload = pii_engine.mask_volunteer_profile(
+            profile_payload, 
+            user_context, 
+            target_user_id=str(contact_id)
+        )
+    except Exception as e:
+        print(f"⚠️ PII redaction error: {e}")
+        # Fall back to basic public masking
+        user_context = UserContext(permission_level=ViewPermissionLevel.PUBLIC)
+        masked_payload = pii_engine.mask_data(profile_payload, user_context)
+    
+    # Save context for subsequent AI chats (use original unmasked data)
     try:
         ai_assistant.add_context("profile", profile_payload)
     except Exception:
         pass
-    return JSONResponse(content=profile_payload)
+    
+    return JSONResponse(content=masked_payload)
 
 # Main chat interface
 @app.post("/api/chat")
 async def chat_with_assistant(
     chat_data: ChatMessage,
-    background_tasks: BackgroundTasks
+    background_tasks: BackgroundTasks,
+    current_user = Depends(lambda: get_current_user_optional(database))
 ) -> JSONResponse:
     """Main chat endpoint for the AI assistant"""
     
@@ -422,6 +522,9 @@ async def chat_with_assistant(
             conversation_id=chat_data.conversation_id
         )
         
+        # Use current user ID if available
+        user_id = current_user['id'] if current_user else chat_data.user_id
+        
         # Save to database in background
         if chat_data.conversation_id:
             background_tasks.add_task(
@@ -429,7 +532,7 @@ async def chat_with_assistant(
                 chat_data.conversation_id,
                 chat_data.message,
                 response.get('response', ''),
-                chat_data.user_id
+                user_id
             )
         
         # Track analytics
@@ -440,7 +543,7 @@ async def chat_with_assistant(
                 "message_length": len(chat_data.message),
                 "response_success": response.get('success', False)
             },
-            chat_data.user_id,
+            user_id,
             chat_data.conversation_id
         )
         
@@ -454,8 +557,9 @@ async def chat_with_assistant(
 @app.post("/api/match")
 async def get_volunteer_matches(
     preferences: UserPreferences,
-    user_id: Optional[str] = None,
-    background_tasks: BackgroundTasks = None
+    background_tasks: BackgroundTasks,
+    current_user = Depends(lambda: get_current_user_optional(database)),
+    user_id: Optional[str] = None
 ) -> JSONResponse:
     """Get personalized volunteer recommendations"""
     
@@ -491,18 +595,21 @@ async def get_volunteer_matches(
             "generated_at": datetime.now().isoformat()
         }
         
+        # Use current user ID if available, otherwise fallback to provided user_id
+        effective_user_id = current_user['id'] if current_user else user_id
+        
         # Save matches to database
-        if user_id:
+        if effective_user_id:
             background_tasks.add_task(
                 database.save_volunteer_matches,
-                user_id,
+                effective_user_id,
                 ml_matches
             )
             
             # Save preferences
             background_tasks.add_task(
                 database.save_user_preferences,
-                user_id,
+                effective_user_id,
                 preferences_dict
             )
         
@@ -515,7 +622,7 @@ async def get_volunteer_matches(
                 "matches_count": len(ml_matches),
                 "top_match_score": ml_matches[0]['score'] if ml_matches else 0
             },
-            user_id
+            effective_user_id
         )
         
         return JSONResponse(content=result)
@@ -549,7 +656,7 @@ async def create_user(user_data: UserProfile) -> JSONResponse:
         raise HTTPException(status_code=500, detail="User creation failed")
 
 @app.get("/api/users/{user_id}")
-async def get_user(user_id: str) -> JSONResponse:
+async def get_user(user_id: str, request: Request) -> JSONResponse:
     """Get user profile"""
     
     try:
@@ -562,12 +669,28 @@ async def get_user(user_id: str) -> JSONResponse:
             # Get user matches
             matches = await database.get_user_matches(user_id)
             
-            return JSONResponse(content={
+            response_data = {
                 "user": user,
                 "preferences": preferences,
                 "matches": matches,
                 "success": True
-            })
+            }
+            
+            # Apply PII redaction based on user context
+            try:
+                user_context = get_user_context_from_request(request)
+                masked_response = pii_engine.mask_volunteer_profile(
+                    response_data, 
+                    user_context, 
+                    target_user_id=user_id
+                )
+            except Exception as e:
+                print(f"⚠️ PII redaction error: {e}")
+                # Fall back to basic public masking
+                user_context = UserContext(permission_level=ViewPermissionLevel.PUBLIC)
+                masked_response = pii_engine.mask_data(response_data, user_context)
+            
+            return JSONResponse(content=masked_response)
         else:
             raise HTTPException(status_code=404, detail="User not found")
             
@@ -691,6 +814,260 @@ async def get_analytics(days: int = 30) -> JSONResponse:
         print(f"❌ Analytics error: {e}")
         raise HTTPException(status_code=500, detail="Analytics not available")
 
+# Google Calendar Integration Endpoints
+
+@app.get("/api/calendar/auth-url/{user_id}")
+async def get_calendar_auth_url(user_id: str) -> JSONResponse:
+    """Get Google Calendar OAuth authorization URL for a user"""
+    try:
+        redirect_uri = f"{settings.BASE_URL}/api/calendar/callback"
+        auth_url = calendar_client.get_authorization_url(user_id, redirect_uri)
+        
+        return JSONResponse(content={
+            "auth_url": auth_url,
+            "user_id": user_id,
+            "success": True
+        })
+        
+    except Exception as e:
+        logger.error(f"Error generating calendar auth URL: {e}")
+        raise HTTPException(status_code=500, detail="Failed to generate authorization URL")
+
+@app.get("/api/calendar/callback")
+async def calendar_auth_callback(code: str, state: str, error: str = None):
+    """Handle Google Calendar OAuth callback"""
+    if error:
+        return JSONResponse(content={"success": False, "error": error}, status_code=400)
+    
+    try:
+        user_id = state  # state parameter contains user_id
+        redirect_uri = f"{settings.BASE_URL}/api/calendar/callback"
+        
+        # Exchange code for tokens
+        token_data = calendar_client.exchange_code_for_tokens(user_id, code, redirect_uri)
+        
+        # Get user's calendar list to find primary calendar
+        calendars = calendar_client.list_calendars(user_id)
+        primary_calendar = next((cal for cal in calendars if cal.get('primary')), calendars[0] if calendars else None)
+        
+        # Save authentication data to database
+        auth_data = {
+            'user_id': user_id,
+            'access_token': token_data['access_token'],
+            'refresh_token': token_data['refresh_token'],
+            'expires_at': token_data['expires_at'],
+            'scopes': token_data['scopes'],
+            'calendar_id': primary_calendar['id'] if primary_calendar else 'primary',
+            'sync_enabled': True
+        }
+        
+        success = await database.save_google_calendar_auth(user_id, auth_data)
+        
+        if success:
+            # Track calendar connection event
+            await database.track_event(
+                "calendar_connected",
+                {"calendar_id": auth_data['calendar_id']},
+                user_id
+            )
+            
+            return JSONResponse(content={
+                "success": True,
+                "message": "Google Calendar connected successfully",
+                "calendar_id": auth_data['calendar_id']
+            })
+        else:
+            raise HTTPException(status_code=500, detail="Failed to save calendar authentication")
+            
+    except Exception as e:
+        logger.error(f"Error in calendar auth callback: {e}")
+        raise HTTPException(status_code=500, detail="Calendar authentication failed")
+
+@app.get("/api/calendar/status/{user_id}")
+async def get_calendar_status(user_id: str) -> JSONResponse:
+    """Get Google Calendar connection status for a user"""
+    try:
+        auth_data = await database.get_google_calendar_auth(user_id)
+        is_authenticated = calendar_client.is_user_authenticated(user_id)
+        
+        return JSONResponse(content={
+            "connected": auth_data is not None,
+            "authenticated": is_authenticated,
+            "sync_enabled": auth_data.get('sync_enabled', False) if auth_data else False,
+            "calendar_id": auth_data.get('calendar_id') if auth_data else None,
+            "email": auth_data.get('email') if auth_data else None
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting calendar status: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get calendar status")
+
+@app.post("/api/calendar/disconnect/{user_id}")
+async def disconnect_calendar(user_id: str) -> JSONResponse:
+    """Disconnect Google Calendar for a user"""
+    try:
+        # Revoke Google access
+        calendar_client.revoke_user_access(user_id)
+        
+        # Remove from database
+        await database.delete_google_calendar_auth(user_id)
+        
+        # Track disconnection
+        await database.track_event("calendar_disconnected", {}, user_id)
+        
+        return JSONResponse(content={
+            "success": True,
+            "message": "Google Calendar disconnected successfully"
+        })
+        
+    except Exception as e:
+        logger.error(f"Error disconnecting calendar: {e}")
+        raise HTTPException(status_code=500, detail="Failed to disconnect calendar")
+
+@app.post("/api/calendar/sync/{user_id}")
+async def sync_calendar(user_id: str, sync_request: CalendarSyncRequest) -> JSONResponse:
+    """Manually trigger calendar sync for a user"""
+    if not calendar_sync_service:
+        raise HTTPException(status_code=503, detail="Calendar sync service not available")
+    
+    try:
+        result = await calendar_sync_service.sync_volunteer_shifts(user_id, sync_request.sync_direction)
+        
+        # Track sync event
+        await database.track_event(
+            "calendar_sync",
+            {
+                "sync_direction": sync_request.sync_direction,
+                "result": result['summary']
+            },
+            user_id
+        )
+        
+        return JSONResponse(content=result)
+        
+    except Exception as e:
+        logger.error(f"Error syncing calendar: {e}")
+        raise HTTPException(status_code=500, detail="Calendar sync failed")
+
+@app.post("/api/shifts")
+async def create_volunteer_shift(shift_data: VolunteerShiftData, user_id: str) -> JSONResponse:
+    """Create a new volunteer shift"""
+    if not calendar_sync_service:
+        raise HTTPException(status_code=503, detail="Calendar sync service not available")
+    
+    try:
+        shift_dict = shift_data.dict()
+        shift_dict['user_id'] = user_id
+        
+        result = await calendar_sync_service.create_shift_with_calendar(shift_dict)
+        
+        # Track shift creation
+        await database.track_event(
+            "shift_created",
+            {
+                "project_name": shift_data.project_name,
+                "branch": shift_data.branch,
+                "calendar_synced": result.get('calendar_synced', False)
+            },
+            user_id
+        )
+        
+        return JSONResponse(content=result)
+        
+    except Exception as e:
+        logger.error(f"Error creating volunteer shift: {e}")
+        raise HTTPException(status_code=500, detail="Failed to create volunteer shift")
+
+@app.put("/api/shifts/{shift_id}")
+async def update_volunteer_shift(shift_id: str, shift_updates: VolunteerShiftData, user_id: str) -> JSONResponse:
+    """Update a volunteer shift"""
+    if not calendar_sync_service:
+        raise HTTPException(status_code=503, detail="Calendar sync service not available")
+    
+    try:
+        updates = shift_updates.dict(exclude_unset=True)
+        updates['user_id'] = user_id
+        
+        result = await calendar_sync_service.update_shift_with_calendar(shift_id, updates)
+        
+        # Track shift update
+        await database.track_event(
+            "shift_updated",
+            {
+                "shift_id": shift_id,
+                "calendar_synced": result.get('calendar_synced', False)
+            },
+            user_id
+        )
+        
+        return JSONResponse(content=result)
+        
+    except Exception as e:
+        logger.error(f"Error updating volunteer shift: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update volunteer shift")
+
+@app.delete("/api/shifts/{shift_id}")
+async def delete_volunteer_shift(shift_id: str, user_id: str) -> JSONResponse:
+    """Delete a volunteer shift"""
+    if not calendar_sync_service:
+        raise HTTPException(status_code=503, detail="Calendar sync service not available")
+    
+    try:
+        result = await calendar_sync_service.delete_shift_with_calendar(shift_id, user_id)
+        
+        # Track shift deletion
+        await database.track_event(
+            "shift_deleted",
+            {
+                "shift_id": shift_id,
+                "calendar_deleted": result.get('calendar_deleted', False)
+            },
+            user_id
+        )
+        
+        return JSONResponse(content=result)
+        
+    except Exception as e:
+        logger.error(f"Error deleting volunteer shift: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete volunteer shift")
+
+@app.get("/api/shifts/{user_id}")
+async def get_volunteer_shifts(user_id: str, 
+                              start_date: Optional[str] = None,
+                              end_date: Optional[str] = None) -> JSONResponse:
+    """Get volunteer shifts for a user"""
+    try:
+        start_dt = datetime.fromisoformat(start_date.replace('Z', '+00:00')) if start_date else None
+        end_dt = datetime.fromisoformat(end_date.replace('Z', '+00:00')) if end_date else None
+        
+        shifts = await database.get_volunteer_shifts(user_id, start_dt, end_dt)
+        
+        return JSONResponse(content={
+            "shifts": shifts,
+            "user_id": user_id,
+            "count": len(shifts)
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting volunteer shifts: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get volunteer shifts")
+
+@app.get("/api/calendar/sync-history/{user_id}")
+async def get_sync_history(user_id: str, limit: int = 50) -> JSONResponse:
+    """Get calendar sync history for a user"""
+    try:
+        history = await database.get_sync_history(user_id, limit)
+        
+        return JSONResponse(content={
+            "sync_history": history,
+            "user_id": user_id,
+            "count": len(history)
+        })
+        
+    except Exception as e:
+        logger.error(f"Error getting sync history: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get sync history")
+
 # Resources and information
 @app.get("/api/resources")
 async def get_resources() -> JSONResponse:
@@ -736,6 +1113,8 @@ async def get_resources() -> JSONResponse:
     
     return JSONResponse(content=resources)
 
+
+
 # Main web interface
 @app.get("/", response_class=HTMLResponse)
 async def main_interface():
@@ -773,7 +1152,7 @@ async def main_interface():
         <section class=\"hero\">
           <h1>YMCA Volunteer PathFinder</h1>
           <p class=\"lead\">An AI assistant that helps you explore, understand, and navigate YMCA volunteer opportunities.</p>
-          <a class=\"cta\" href=\"/chat\">Start Chat</a>
+
         </section>
 
         <section class=\"section\">
@@ -842,363 +1221,7 @@ async def main_interface():
     </html>
     """)
 
-# Email/SMS Drafting Endpoints
 
-def _create_personalization_context(contact_id: Optional[str], name: Optional[str]) -> PersonalizationContext:
-    """Create PersonalizationContext from available data"""
-    context = PersonalizationContext()
-    
-    # Use name from request or try to get from profile data
-    if name:
-        context.name = name
-    elif contact_id and volunteer_data:
-        # Try to find person in volunteer data
-        profiles = volunteer_data.get('volunteers')
-        interactions = volunteer_data.get('interactions')
-        
-        if profiles is not None:
-            # Find by contact_id
-            profile_match = profiles[profiles['contact_id'] == contact_id]
-            if not profile_match.empty:
-                profile = profile_match.iloc[0]
-                context.contact_id = contact_id
-                context.name = f"{profile.get('first_name', '')} {profile.get('last_name', '')}".strip()
-                context.age = profile.get('age')
-                context.gender = profile.get('gender')
-                context.is_ymca_member = bool(profile.get('is_ymca_member', False))
-                context.member_branch = profile.get('member_branch')
-                context.engagement_level = profile.get('volunteer_type', 'new')
-        
-        if interactions is not None and contact_id:
-            # Get volunteer history
-            person_interactions = interactions[interactions['contact_id'] == contact_id]
-            if not person_interactions.empty:
-                context.volunteer_history = {
-                    'total_hours': person_interactions['hours'].sum(),
-                    'sessions': len(person_interactions),
-                    'unique_projects': person_interactions['project_id'].nunique(),
-                    'first_date': str(person_interactions['date'].min()),
-                    'last_date': str(person_interactions['date'].max()),
-                    'top_categories': person_interactions['project_category'].value_counts().to_dict()
-                }
-    
-    return context
-
-@app.post("/api/draft-message")
-async def draft_message(request: MessageDraftRequest) -> JSONResponse:
-    """Draft a personalized email or SMS message"""
-    
-    if not drafting_engine:
-        raise HTTPException(status_code=503, detail="Drafting engine not available")
-    
-    try:
-        # Create personalization context
-        person_context = _create_personalization_context(request.contact_id, request.name)
-        
-        # Parse enum values
-        try:
-            purpose = OutreachPurpose(request.purpose)
-            message_type = MessageType(request.message_type)
-            tone = MessageTone(request.tone) if request.tone else None
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=f"Invalid enum value: {e}")
-        
-        # Auto-detect tone if not provided
-        if not tone:
-            tone_analysis = tone_analyzer.analyze_tone(
-                person_context=person_context,
-                message_purpose=purpose,
-                interaction_history=None,  # Could be enhanced to get from DB
-                volunteer_data=volunteer_data
-            )
-            tone = tone_analysis.recommended_tone
-        
-        # Create message context
-        message_context = MessageContext(
-            purpose=purpose,
-            tone=tone,
-            message_type=message_type,
-            urgency_level=request.urgency_level,
-            event_details=request.event_details,
-            volunteer_opportunity=request.volunteer_opportunity,
-            follow_up_context=None
-        )
-        
-        # Use template if specified
-        if request.template_id:
-            if not template_engine:
-                raise HTTPException(status_code=503, detail="Template engine not available")
-            
-            rendered = template_engine.render_template(
-                template_id=request.template_id,
-                person_context=person_context,
-                context_data={
-                    'opportunity': request.volunteer_opportunity,
-                    'event': request.event_details
-                }
-            )
-            
-            drafted_message = DraftedMessage(
-                subject=rendered.get('subject'),
-                content=rendered['content'],
-                message_type=message_type,
-                tone=tone,
-                purpose=purpose,
-                personalization_score=0.8,  # Templates are generally well-personalized
-                estimated_engagement=0.7,
-                character_count=len(rendered['content']),
-                metadata={
-                    'template_used': request.template_id,
-                    'variables_used': rendered.get('variables_used', [])
-                },
-                created_at=datetime.now()
-            )
-        else:
-            # Generate using AI
-            drafted_message = await drafting_engine.draft_message(
-                person_context=person_context,
-                message_context=message_context,
-                custom_instructions=request.custom_instructions
-            )
-        
-        # Convert to response format
-        response_data = {
-            "success": True,
-            "message": {
-                "subject": drafted_message.subject,
-                "content": drafted_message.content,
-                "message_type": drafted_message.message_type.value,
-                "tone": drafted_message.tone.value,
-                "purpose": drafted_message.purpose.value,
-                "character_count": drafted_message.character_count,
-                "personalization_score": drafted_message.personalization_score,
-                "estimated_engagement": drafted_message.estimated_engagement,
-                "created_at": drafted_message.created_at.isoformat(),
-                "metadata": drafted_message.metadata
-            },
-            "context_used": {
-                "has_name": bool(person_context.name),
-                "has_volunteer_history": bool(person_context.volunteer_history),
-                "has_branch_info": bool(person_context.member_branch),
-                "engagement_level": person_context.engagement_level
-            },
-            "optimal_send_time": drafting_engine.get_optimal_send_time(
-                person_context, message_type
-            ) if drafting_engine else None
-        }
-        
-        return JSONResponse(content=response_data)
-        
-    except Exception as e:
-        print(f"❌ Message drafting error: {e}")
-        raise HTTPException(status_code=500, detail=f"Message drafting failed: {str(e)}")
-
-@app.post("/api/analyze-tone")
-async def analyze_tone(request: ToneAnalysisRequest) -> JSONResponse:
-    """Analyze optimal tone for a message based on user context"""
-    
-    if not tone_analyzer:
-        raise HTTPException(status_code=503, detail="Tone analyzer not available")
-    
-    try:
-        # Create personalization context
-        person_context = _create_personalization_context(request.contact_id, request.name)
-        
-        # Parse purpose
-        try:
-            purpose = OutreachPurpose(request.message_purpose)
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=f"Invalid purpose: {e}")
-        
-        # Perform tone analysis
-        analysis = tone_analyzer.analyze_tone(
-            person_context=person_context,
-            message_purpose=purpose,
-            interaction_history=request.interaction_history,
-            volunteer_data=volunteer_data
-        )
-        
-        response_data = {
-            "success": True,
-            "analysis": {
-                "recommended_tone": analysis.recommended_tone.value,
-                "communication_style": analysis.communication_style.value,
-                "engagement_pattern": analysis.engagement_pattern.value,
-                "responsiveness_level": analysis.responsiveness_level.value,
-                "confidence_score": analysis.confidence_score,
-                "reasoning": analysis.reasoning,
-                "alternative_tones": [tone.value for tone in analysis.alternative_tones],
-                "personalization_opportunities": analysis.personalization_opportunities,
-                "risk_factors": analysis.risk_factors,
-                "optimal_message_length": analysis.optimal_message_length,
-                "emoji_recommendation": analysis.emoji_recommendation
-            }
-        }
-        
-        return JSONResponse(content=response_data)
-        
-    except Exception as e:
-        print(f"❌ Tone analysis error: {e}")
-        raise HTTPException(status_code=500, detail=f"Tone analysis failed: {str(e)}")
-
-@app.post("/api/draft-variants")
-async def draft_message_variants(request: MessageVariantsRequest) -> JSONResponse:
-    """Generate multiple variants of a message for A/B testing"""
-    
-    if not drafting_engine:
-        raise HTTPException(status_code=503, detail="Drafting engine not available")
-    
-    try:
-        # Create personalization context
-        person_context = _create_personalization_context(request.contact_id, request.name)
-        
-        # Parse enum values
-        try:
-            purpose = OutreachPurpose(request.purpose)
-            message_type = MessageType(request.message_type)
-        except ValueError as e:
-            raise HTTPException(status_code=400, detail=f"Invalid enum value: {e}")
-        
-        # Create base message context
-        base_context = MessageContext(
-            purpose=purpose,
-            tone=MessageTone.WELCOMING,  # Will be varied
-            message_type=message_type,
-            urgency_level=1,
-            event_details=request.event_details,
-            volunteer_opportunity=request.volunteer_opportunity
-        )
-        
-        # Generate variants
-        variants = await drafting_engine.generate_multiple_variants(
-            person_context=person_context,
-            message_context=base_context,
-            num_variants=min(request.num_variants, 5)  # Limit to 5 variants
-        )
-        
-        # Convert to response format
-        variant_data = []
-        for i, variant in enumerate(variants):
-            variant_data.append({
-                "variant_id": f"variant_{i+1}",
-                "subject": variant.subject,
-                "content": variant.content,
-                "tone": variant.tone.value,
-                "personalization_score": variant.personalization_score,
-                "estimated_engagement": variant.estimated_engagement,
-                "character_count": variant.character_count,
-                "metadata": variant.metadata
-            })
-        
-        response_data = {
-            "success": True,
-            "variants": variant_data,
-            "recommendations": {
-                "best_for_engagement": max(variant_data, key=lambda x: x['estimated_engagement']),
-                "most_personalized": max(variant_data, key=lambda x: x['personalization_score']),
-                "testing_notes": [
-                    "Test variants with different audience segments",
-                    "Monitor open rates and response rates",
-                    "Consider seasonal and timing factors"
-                ]
-            }
-        }
-        
-        return JSONResponse(content=response_data)
-        
-    except Exception as e:
-        print(f"❌ Variant generation error: {e}")
-        raise HTTPException(status_code=500, detail=f"Variant generation failed: {str(e)}")
-
-@app.get("/api/templates")
-async def list_templates(
-    purpose: Optional[str] = None,
-    tone: Optional[str] = None, 
-    message_type: Optional[str] = None
-) -> JSONResponse:
-    """List available message templates with optional filtering"""
-    
-    if not template_engine:
-        raise HTTPException(status_code=503, detail="Template engine not available")
-    
-    try:
-        # Parse filter parameters
-        purpose_filter = OutreachPurpose(purpose) if purpose else None
-        tone_filter = MessageTone(tone) if tone else None
-        type_filter = MessageType(message_type) if message_type else None
-        
-        # Get templates
-        templates = template_engine.get_templates_by_criteria(
-            purpose=purpose_filter,
-            tone=tone_filter,
-            message_type=type_filter
-        )
-        
-        # Convert to response format
-        template_data = []
-        for template in templates:
-            template_data.append({
-                "id": template.id,
-                "name": template.name,
-                "purpose": template.purpose.value,
-                "tone": template.tone.value,
-                "message_type": template.message_type.value,
-                "usage_notes": template.usage_notes,
-                "variables": [
-                    {
-                        "name": var.name,
-                        "description": var.description,
-                        "required": var.required,
-                        "default_value": var.default_value
-                    } for var in template.variables
-                ]
-            })
-        
-        return JSONResponse(content={
-            "success": True,
-            "templates": template_data,
-            "total_count": len(template_data)
-        })
-        
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=f"Invalid filter value: {e}")
-    except Exception as e:
-        print(f"❌ Template listing error: {e}")
-        raise HTTPException(status_code=500, detail=f"Template listing failed: {str(e)}")
-
-@app.post("/api/render-template")
-async def render_template(request: TemplateRenderRequest) -> JSONResponse:
-    """Render a specific template with personalization"""
-    
-    if not template_engine:
-        raise HTTPException(status_code=503, detail="Template engine not available")
-    
-    try:
-        # Create personalization context
-        person_context = _create_personalization_context(request.contact_id, request.name)
-        
-        # Render template
-        rendered = template_engine.render_template(
-            template_id=request.template_id,
-            person_context=person_context,
-            custom_variables=request.custom_variables,
-            context_data=request.context_data or {}
-        )
-        
-        return JSONResponse(content={
-            "success": True,
-            "rendered": rendered,
-            "personalization_context": {
-                "name": person_context.name,
-                "has_volunteer_history": bool(person_context.volunteer_history),
-                "member_branch": person_context.member_branch,
-                "engagement_level": person_context.engagement_level
-            }
-        })
-        
-    except Exception as e:
-        print(f"❌ Template rendering error: {e}")
-        raise HTTPException(status_code=500, detail=f"Template rendering failed: {str(e)}")
 
 # Background task helpers
 async def save_conversation_message(conversation_id: str, user_message: str, 
@@ -1209,6 +1232,9 @@ async def save_conversation_message(conversation_id: str, user_message: str,
         await database.save_message(conversation_id, 'assistant', ai_response, user_id)
     except Exception as e:
         print(f"❌ Error saving conversation: {e}")
+
+# Set up reimbursement API endpoints
+setup_reimbursement_api(app, database, reimbursement_manager)
 
 # Run the application
 if __name__ == "__main__":
