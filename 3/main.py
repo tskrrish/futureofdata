@@ -2,7 +2,7 @@
 Main FastAPI application for Volunteer PathFinder AI Assistant
 Brings together AI, matching engine, and database
 """
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
@@ -20,6 +20,8 @@ from ai_assistant import VolunteerAIAssistant
 from matching_engine import VolunteerMatchingEngine
 from data_processor import VolunteerDataProcessor
 from database import VolunteerDatabase
+from ocr_processor import OCRProcessor
+from data_extractor import DataExtractor, VolunteerOpportunity
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -43,6 +45,8 @@ ai_assistant = VolunteerAIAssistant()
 database = VolunteerDatabase()
 volunteer_data = None
 matching_engine = None
+ocr_processor = OCRProcessor()
+data_extractor = DataExtractor()
 
 # Pydantic models
 class UserProfile(BaseModel):
@@ -77,6 +81,11 @@ class FeedbackData(BaseModel):
     rating: Optional[int] = None
     feedback_text: str = ""
     feedback_type: str = "general"
+
+class OCRProcessRequest(BaseModel):
+    filename: Optional[str] = None
+    extract_structured: bool = True
+    save_to_database: bool = False
 
 # Initialize data on startup
 @app.on_event("startup")
@@ -678,6 +687,276 @@ async def get_resources() -> JSONResponse:
     
     return JSONResponse(content=resources)
 
+# OCR Import Endpoints
+@app.post("/api/ocr/upload")
+async def upload_and_process_file(
+    file: UploadFile = File(...),
+    extract_structured: bool = Form(True),
+    save_to_database: bool = Form(False),
+    user_id: Optional[str] = Form(None),
+    background_tasks: BackgroundTasks = BackgroundTasks()
+) -> JSONResponse:
+    """Upload and process a file (image or PDF) using OCR to extract volunteer opportunity data"""
+    
+    try:
+        # Validate file type
+        allowed_types = ['image/jpeg', 'image/png', 'image/bmp', 'image/tiff', 'application/pdf']
+        if file.content_type not in allowed_types:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Unsupported file type: {file.content_type}. Allowed: {', '.join(allowed_types)}"
+            )
+        
+        # Check file size (limit to 10MB)
+        file_bytes = await file.read()
+        if len(file_bytes) > 10 * 1024 * 1024:  # 10MB
+            raise HTTPException(status_code=400, detail="File size too large. Maximum 10MB allowed.")
+        
+        # Process the file with OCR
+        print(f"🔍 Processing {file.filename} ({len(file_bytes)} bytes)")
+        ocr_result = ocr_processor.process_file(file_bytes, file.filename)
+        
+        # Extract structured data if requested
+        structured_opportunity = None
+        if extract_structured and ocr_result.get('raw_text'):
+            structured_opportunity = data_extractor.extract_volunteer_opportunity(ocr_result)
+            structured_dict = data_extractor.to_dict(structured_opportunity)
+        else:
+            structured_dict = None
+        
+        # Prepare response
+        response_data = {
+            'filename': file.filename,
+            'file_size_bytes': len(file_bytes),
+            'processing_success': bool(ocr_result.get('raw_text')),
+            'ocr_result': ocr_result,
+            'structured_data': structured_dict,
+            'processed_at': datetime.now().isoformat()
+        }
+        
+        # Save to database in background if requested
+        if save_to_database and structured_opportunity:
+            background_tasks.add_task(
+                save_extracted_opportunity,
+                structured_dict,
+                user_id,
+                file.filename
+            )
+        
+        # Track analytics
+        background_tasks.add_task(
+            database.track_event,
+            "ocr_file_processed",
+            {
+                "filename": file.filename,
+                "file_type": ocr_result.get('file_type', 'unknown'),
+                "confidence": ocr_result.get('confidence', 0),
+                "has_structured_data": structured_dict is not None,
+                "text_length": len(ocr_result.get('raw_text', ''))
+            },
+            user_id
+        )
+        
+        print(f"✅ Successfully processed {file.filename}")
+        return JSONResponse(content=response_data)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ OCR processing error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to process file: {str(e)}")
+
+@app.post("/api/ocr/extract-text")
+async def extract_text_only(
+    file: UploadFile = File(...),
+    user_id: Optional[str] = Form(None),
+    background_tasks: BackgroundTasks = BackgroundTasks()
+) -> JSONResponse:
+    """Extract only raw text from uploaded file without structured data processing"""
+    
+    try:
+        # Basic validation
+        if file.content_type not in ['image/jpeg', 'image/png', 'image/bmp', 'image/tiff', 'application/pdf']:
+            raise HTTPException(status_code=400, detail="Unsupported file type")
+        
+        file_bytes = await file.read()
+        if len(file_bytes) > 10 * 1024 * 1024:
+            raise HTTPException(status_code=400, detail="File too large")
+        
+        # Process with OCR (no structured extraction)
+        ocr_result = ocr_processor.process_file(file_bytes, file.filename)
+        
+        response_data = {
+            'filename': file.filename,
+            'raw_text': ocr_result.get('raw_text', ''),
+            'confidence': ocr_result.get('confidence', 0),
+            'processing_method': ocr_result.get('processing_method', 'unknown'),
+            'word_count': len(ocr_result.get('raw_text', '').split()),
+            'processed_at': datetime.now().isoformat()
+        }
+        
+        # Track usage
+        background_tasks.add_task(
+            database.track_event,
+            "ocr_text_extraction",
+            {
+                "filename": file.filename,
+                "confidence": ocr_result.get('confidence', 0),
+                "text_length": len(ocr_result.get('raw_text', ''))
+            },
+            user_id
+        )
+        
+        return JSONResponse(content=response_data)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Text extraction error: {e}")
+        raise HTTPException(status_code=500, detail="Text extraction failed")
+
+@app.get("/api/ocr/history")
+async def get_ocr_processing_history(
+    user_id: Optional[str] = None,
+    limit: int = 20,
+    days: int = 30
+) -> JSONResponse:
+    """Get history of OCR processing for a user or system-wide"""
+    
+    try:
+        # Get processing history from analytics/events
+        history_data = await database.get_user_analytics(days, user_id)
+        
+        # Filter OCR-related events
+        ocr_events = [
+            event for event in history_data.get('events', [])
+            if event.get('event_type', '').startswith('ocr_')
+        ]
+        
+        # Sort by most recent and limit
+        sorted_events = sorted(
+            ocr_events, 
+            key=lambda x: x.get('created_at', ''), 
+            reverse=True
+        )[:limit]
+        
+        return JSONResponse(content={
+            'ocr_history': sorted_events,
+            'total_processed': len(ocr_events),
+            'date_range_days': days,
+            'user_id': user_id
+        })
+        
+    except Exception as e:
+        print(f"❌ OCR history error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get OCR history")
+
+@app.get("/api/ocr/supported-formats")
+async def get_supported_formats() -> JSONResponse:
+    """Get list of supported file formats and processing capabilities"""
+    
+    return JSONResponse(content={
+        'supported_formats': {
+            'images': ['.jpg', '.jpeg', '.png', '.bmp', '.tiff'],
+            'documents': ['.pdf']
+        },
+        'max_file_size_mb': 10,
+        'processing_methods': ['tesseract', 'easyocr'],
+        'features': {
+            'text_extraction': True,
+            'structured_data_extraction': True,
+            'multi_page_pdf': True,
+            'image_preprocessing': True,
+            'confidence_scoring': True
+        },
+        'data_types_extracted': [
+            'emails', 'phone_numbers', 'dates', 'times', 'addresses',
+            'requirements', 'volunteer_categories', 'skills', 'age_requirements'
+        ]
+    })
+
+@app.post("/api/ocr/batch-process")
+async def batch_process_files(
+    files: List[UploadFile] = File(...),
+    extract_structured: bool = Form(True),
+    save_to_database: bool = Form(False),
+    user_id: Optional[str] = Form(None),
+    background_tasks: BackgroundTasks = BackgroundTasks()
+) -> JSONResponse:
+    """Process multiple files in batch (limit 5 files at once)"""
+    
+    try:
+        if len(files) > 5:
+            raise HTTPException(status_code=400, detail="Maximum 5 files allowed per batch")
+        
+        total_size = 0
+        results = []
+        
+        for file in files:
+            file_bytes = await file.read()
+            total_size += len(file_bytes)
+            
+            if total_size > 25 * 1024 * 1024:  # 25MB total limit
+                raise HTTPException(status_code=400, detail="Total batch size too large (max 25MB)")
+            
+            # Process each file
+            try:
+                ocr_result = ocr_processor.process_file(file_bytes, file.filename)
+                
+                structured_data = None
+                if extract_structured and ocr_result.get('raw_text'):
+                    opportunity = data_extractor.extract_volunteer_opportunity(ocr_result)
+                    structured_data = data_extractor.to_dict(opportunity)
+                    
+                    # Save to database if requested
+                    if save_to_database:
+                        background_tasks.add_task(
+                            save_extracted_opportunity,
+                            structured_data,
+                            user_id,
+                            file.filename
+                        )
+                
+                results.append({
+                    'filename': file.filename,
+                    'success': True,
+                    'ocr_result': ocr_result,
+                    'structured_data': structured_data
+                })
+                
+            except Exception as e:
+                results.append({
+                    'filename': file.filename,
+                    'success': False,
+                    'error': str(e)
+                })
+        
+        # Track batch processing
+        background_tasks.add_task(
+            database.track_event,
+            "ocr_batch_processed",
+            {
+                "files_count": len(files),
+                "total_size_mb": total_size / (1024 * 1024),
+                "successful_count": len([r for r in results if r.get('success')])
+            },
+            user_id
+        )
+        
+        return JSONResponse(content={
+            'batch_results': results,
+            'total_files': len(files),
+            'successful': len([r for r in results if r.get('success')]),
+            'failed': len([r for r in results if not r.get('success')]),
+            'processed_at': datetime.now().isoformat()
+        })
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Batch processing error: {e}")
+        raise HTTPException(status_code=500, detail="Batch processing failed")
+
 # Main web interface
 @app.get("/", response_class=HTMLResponse)
 async def main_interface():
@@ -793,6 +1072,35 @@ async def save_conversation_message(conversation_id: str, user_message: str,
         await database.save_message(conversation_id, 'assistant', ai_response, user_id)
     except Exception as e:
         print(f"❌ Error saving conversation: {e}")
+
+async def save_extracted_opportunity(opportunity_data: Dict[str, Any], 
+                                   user_id: str = None, filename: str = None):
+    """Save extracted volunteer opportunity to database"""
+    try:
+        # Add metadata
+        opportunity_data.update({
+            'source_type': 'ocr_import',
+            'source_file': filename,
+            'imported_by': user_id,
+            'import_timestamp': datetime.now().isoformat()
+        })
+        
+        # Save opportunity data (this would require extending the database schema)
+        # For now, we'll save it as a special event
+        await database.track_event(
+            "volunteer_opportunity_extracted",
+            {
+                "opportunity": opportunity_data,
+                "source_file": filename,
+                "confidence": opportunity_data.get('confidence_score', 0)
+            },
+            user_id
+        )
+        
+        print(f"✅ Saved extracted opportunity from {filename}")
+        
+    except Exception as e:
+        print(f"❌ Error saving extracted opportunity: {e}")
 
 # Run the application
 if __name__ == "__main__":

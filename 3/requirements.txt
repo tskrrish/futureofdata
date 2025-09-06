@@ -21,3 +21,8 @@ streamlit==1.28.1
 requests==2.31.0
 websockets==11.0.3
 typing-extensions==4.8.0
+pillow==10.0.0
+pytesseract==0.3.10
+easyocr==1.7.0
+opencv-python==4.8.1.78
+pdf2image==1.16.3
