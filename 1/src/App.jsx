@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Users, Clock, UserCheck, Sparkles } from "lucide-react";
+import { Users, Clock, UserCheck, Sparkles, Target } from "lucide-react";
 
 import { SAMPLE_DATA } from "./data/sampleData";
 import { exportCSV } from "./utils/csvUtils";
@@ -13,6 +13,7 @@ import { OverviewTab } from "./components/tabs/OverviewTab";
 import { BranchesTab } from "./components/tabs/BranchesTab";
 import { PeopleTab } from "./components/tabs/PeopleTab";
 import { PassportTab } from "./components/tabs/PassportTab";
+import SkillsMatrixTab from "./components/tabs/SkillsMatrixTab";
 
 export default function App() {
   const [raw, setRaw] = useState(SAMPLE_DATA);
@@ -79,6 +80,7 @@ export default function App() {
             ["overview", "Overview"],
             ["branches", "Branch Breakdown"],
             ["people", "People & Badges"],
+            ["skills", "Skills Matrix"],
             ["passport", "Belonging Passport"],
           ].map(([id, label]) => (
             <button
@@ -110,6 +112,10 @@ export default function App() {
 
         {tab === "people" && (
           <PeopleTab leaderboard={leaderboard} badges={badges} />
+        )}
+
+        {tab === "skills" && (
+          <SkillsMatrixTab volunteerData={raw} />
         )}
 
         {tab === "passport" && <PassportTab />}
