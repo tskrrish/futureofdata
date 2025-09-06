@@ -20,6 +20,7 @@ from ai_assistant import VolunteerAIAssistant
 from matching_engine import VolunteerMatchingEngine
 from data_processor import VolunteerDataProcessor
 from database import VolunteerDatabase
+from data_quality_api import add_data_quality_routes
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -793,6 +794,9 @@ async def save_conversation_message(conversation_id: str, user_message: str,
         await database.save_message(conversation_id, 'assistant', ai_response, user_id)
     except Exception as e:
         print(f"❌ Error saving conversation: {e}")
+
+# Add data quality routes
+app = add_data_quality_routes(app)
 
 # Run the application
 if __name__ == "__main__":
