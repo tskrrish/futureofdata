@@ -18,6 +18,8 @@ import pandas as pd
 from config import settings
 from ai_assistant import VolunteerAIAssistant
 from matching_engine import VolunteerMatchingEngine
+from team_matching_engine import TeamMatchingEngine
+from friend_group_detector import FriendGroupDetector
 from data_processor import VolunteerDataProcessor
 from database import VolunteerDatabase
 
@@ -43,6 +45,8 @@ ai_assistant = VolunteerAIAssistant()
 database = VolunteerDatabase()
 volunteer_data = None
 matching_engine = None
+team_matching_engine = None
+friend_detector = None
 
 # Pydantic models
 class UserProfile(BaseModel):
@@ -78,11 +82,29 @@ class FeedbackData(BaseModel):
     feedback_text: str = ""
     feedback_type: str = "general"
 
+class TeamPreferences(BaseModel):
+    prefer_friends: bool = True
+    team_size_preference: str = "any"  # 'small', 'medium', 'large', 'any'
+    team_matching_enabled: bool = True
+    min_team_size: int = 2
+    max_team_size: int = 8
+
+class GroupMatchRequest(BaseModel):
+    member_ids: List[str]
+    shared_preferences: Optional[Dict[str, Any]] = None
+    top_k: int = 5
+
+class TeamMatchRequest(BaseModel):
+    user_preferences: UserPreferences
+    team_preferences: TeamPreferences = TeamPreferences()
+    include_friends: bool = True
+    top_k: int = 5
+
 # Initialize data on startup
 @app.on_event("startup")
 async def startup_event():
     """Initialize application data and models"""
-    global volunteer_data, matching_engine
+    global volunteer_data, matching_engine, team_matching_engine, friend_detector
     
     print("🚀 Starting Volunteer PathFinder AI Assistant...")
     
@@ -104,8 +126,18 @@ async def startup_event():
             matching_engine = VolunteerMatchingEngine(volunteer_data)
             matching_engine.train_models()
             
+            # Initialize team matching engine
+            team_matching_engine = TeamMatchingEngine(volunteer_data)
+            team_matching_engine.train_models()
+            team_matching_engine.initialize_friend_detection()
+            
+            # Initialize friend detector
+            friend_detector = FriendGroupDetector(volunteer_data)
+            friend_detector.detect_friend_groups()
+            
             print(f"✅ Loaded {len(volunteer_data['volunteers'])} volunteer profiles")
             print(f"✅ Loaded {len(volunteer_data['projects'])} projects")
+            print(f"✅ Detected {len(friend_detector.friend_groups)} friend groups")
         else:
             print(f"⚠️  Volunteer data file not found: {settings.VOLUNTEER_DATA_PATH}")
     except Exception as e:
@@ -130,7 +162,9 @@ async def health_check():
         "status": "healthy",
         "timestamp": datetime.now().isoformat(),
         "data_loaded": volunteer_data is not None,
-        "models_ready": matching_engine is not None and matching_engine.models_trained
+        "models_ready": matching_engine is not None and matching_engine.models_trained,
+        "team_matching_ready": team_matching_engine is not None and team_matching_engine.models_trained,
+        "friend_groups_detected": len(friend_detector.friend_groups) if friend_detector else 0
     }
 
 # Serve static files (for web interface)
@@ -466,6 +500,229 @@ async def get_volunteer_matches(
         print(f"❌ Matching error: {e}")
         raise HTTPException(status_code=500, detail="Matching service temporarily unavailable")
 
+# Team matching endpoints
+@app.post("/api/team-match")
+async def get_team_matches(
+    team_request: TeamMatchRequest,
+    user_id: Optional[str] = None,
+    background_tasks: BackgroundTasks = None
+) -> JSONResponse:
+    """Get team-aware volunteer recommendations that consider friend groups"""
+    
+    if not team_matching_engine:
+        raise HTTPException(status_code=503, detail="Team matching service not available")
+    
+    try:
+        # Convert preferences to dict
+        user_preferences_dict = team_request.user_preferences.dict()
+        team_preferences_dict = team_request.team_preferences.dict()
+        
+        # Add user_id to preferences for friend group lookup
+        if user_id:
+            user_preferences_dict['user_id'] = user_id
+        
+        # Get team-aware matches
+        team_matches = team_matching_engine.find_team_matches(
+            user_preferences_dict,
+            include_friends=team_request.include_friends,
+            team_size_preference=team_preferences_dict['team_size_preference'],
+            top_k=team_request.top_k
+        )
+        
+        # Get success prediction with team factors
+        success_prediction = team_matching_engine.predict_volunteer_success(user_preferences_dict)
+        
+        # Get branch recommendations
+        branch_recommendations = team_matching_engine.get_branch_recommendations(user_preferences_dict)
+        
+        # Check if user is part of a friend group
+        friend_group_info = None
+        if user_id and friend_detector:
+            friend_group_info = friend_detector.get_friend_group_for_volunteer(user_id)
+        
+        result = {
+            "team_matches": team_matches,
+            "success_prediction": success_prediction,
+            "branch_recommendations": branch_recommendations,
+            "friend_group_info": friend_group_info,
+            "team_preferences": team_preferences_dict,
+            "generated_at": datetime.now().isoformat()
+        }
+        
+        # Save team matches to database
+        if user_id and background_tasks:
+            background_tasks.add_task(
+                save_team_matches_to_db,
+                user_id,
+                team_matches,
+                team_preferences_dict
+            )
+        
+        # Track analytics
+        if background_tasks:
+            background_tasks.add_task(
+                database.track_event,
+                "team_matching",
+                {
+                    "include_friends": team_request.include_friends,
+                    "team_size_preference": team_preferences_dict['team_size_preference'],
+                    "matches_count": len(team_matches),
+                    "friend_group_compatible_matches": sum(1 for m in team_matches if m.get('friend_group_compatible', False))
+                },
+                user_id
+            )
+        
+        return JSONResponse(content=result)
+        
+    except Exception as e:
+        print(f"❌ Team matching error: {e}")
+        raise HTTPException(status_code=500, detail="Team matching service temporarily unavailable")
+
+@app.post("/api/group-match")
+async def get_group_matches(
+    group_request: GroupMatchRequest,
+    background_tasks: BackgroundTasks = None
+) -> JSONResponse:
+    """Get volunteer recommendations for a friend group"""
+    
+    if not team_matching_engine:
+        raise HTTPException(status_code=503, detail="Team matching service not available")
+    
+    try:
+        # Find matches for the friend group
+        group_matches = team_matching_engine.find_matches_for_group(
+            group_request.member_ids,
+            group_request.shared_preferences,
+            group_request.top_k
+        )
+        
+        # Get information about the friend group
+        group_analysis = None
+        if friend_detector and len(group_request.member_ids) >= 2:
+            group_analysis = friend_detector.should_keep_together(group_request.member_ids)
+        
+        result = {
+            "group_matches": group_matches,
+            "group_size": len(group_request.member_ids),
+            "member_ids": group_request.member_ids,
+            "group_analysis": group_analysis,
+            "generated_at": datetime.now().isoformat()
+        }
+        
+        # Track analytics
+        if background_tasks:
+            background_tasks.add_task(
+                database.track_event,
+                "group_matching",
+                {
+                    "group_size": len(group_request.member_ids),
+                    "matches_count": len(group_matches),
+                    "should_keep_together": group_analysis.get('keep_together', False) if group_analysis else False
+                }
+            )
+        
+        return JSONResponse(content=result)
+        
+    except Exception as e:
+        print(f"❌ Group matching error: {e}")
+        raise HTTPException(status_code=500, detail="Group matching service temporarily unavailable")
+
+# Friend group information endpoints
+@app.get("/api/friend-groups")
+async def get_all_friend_groups() -> JSONResponse:
+    """Get all detected friend groups"""
+    
+    if not friend_detector:
+        raise HTTPException(status_code=503, detail="Friend group detection not available")
+    
+    try:
+        export_data = friend_detector.export_friend_groups()
+        return JSONResponse(content=export_data)
+        
+    except Exception as e:
+        print(f"❌ Friend groups error: {e}")
+        raise HTTPException(status_code=500, detail="Friend groups service temporarily unavailable")
+
+@app.get("/api/friend-groups/{volunteer_id}")
+async def get_volunteer_friend_group(volunteer_id: str) -> JSONResponse:
+    """Get friend group information for a specific volunteer"""
+    
+    if not friend_detector:
+        raise HTTPException(status_code=503, detail="Friend group detection not available")
+    
+    try:
+        friend_group = friend_detector.get_friend_group_for_volunteer(volunteer_id)
+        direct_friends = friend_detector.get_volunteer_friends(volunteer_id)
+        
+        result = {
+            "volunteer_id": volunteer_id,
+            "friend_group": friend_group,
+            "direct_friends": direct_friends,
+            "has_friends": len(direct_friends) > 0,
+            "friend_count": len(direct_friends)
+        }
+        
+        return JSONResponse(content=result)
+        
+    except Exception as e:
+        print(f"❌ Volunteer friend group error: {e}")
+        raise HTTPException(status_code=500, detail="Friend group lookup failed")
+
+@app.post("/api/should-keep-together")
+async def check_keep_together(volunteer_ids: List[str]) -> JSONResponse:
+    """Check if a set of volunteers should be kept together"""
+    
+    if not friend_detector:
+        raise HTTPException(status_code=503, detail="Friend group detection not available")
+    
+    try:
+        result = friend_detector.should_keep_together(volunteer_ids)
+        return JSONResponse(content=result)
+        
+    except Exception as e:
+        print(f"❌ Keep together check error: {e}")
+        raise HTTPException(status_code=500, detail="Keep together check failed")
+
+# Team preferences management
+@app.post("/api/team-preferences")
+async def save_team_preferences(
+    team_prefs: TeamPreferences,
+    user_id: str
+) -> JSONResponse:
+    """Save team matching preferences for a user"""
+    
+    try:
+        # Save to database (implement in database.py)
+        success = await save_team_preferences_to_db(user_id, team_prefs.dict())
+        
+        if success:
+            return JSONResponse(content={"success": True, "preferences": team_prefs.dict()})
+        else:
+            raise HTTPException(status_code=400, detail="Failed to save team preferences")
+            
+    except Exception as e:
+        print(f"❌ Team preferences error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to save team preferences")
+
+@app.get("/api/team-preferences/{user_id}")
+async def get_team_preferences(user_id: str) -> JSONResponse:
+    """Get team matching preferences for a user"""
+    
+    try:
+        # Get from database (implement in database.py)
+        preferences = await get_team_preferences_from_db(user_id)
+        
+        if preferences:
+            return JSONResponse(content={"preferences": preferences, "success": True})
+        else:
+            # Return default preferences
+            default_prefs = TeamPreferences()
+            return JSONResponse(content={"preferences": default_prefs.dict(), "success": True})
+            
+    except Exception as e:
+        print(f"❌ Get team preferences error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get team preferences")
+
 # User management
 @app.post("/api/users")
 async def create_user(user_data: UserProfile) -> JSONResponse:
@@ -793,6 +1050,44 @@ async def save_conversation_message(conversation_id: str, user_message: str,
         await database.save_message(conversation_id, 'assistant', ai_response, user_id)
     except Exception as e:
         print(f"❌ Error saving conversation: {e}")
+
+async def save_team_matches_to_db(user_id: str, team_matches: List[Dict[str, Any]], 
+                                team_preferences: Dict[str, Any]):
+    """Save team matches to database"""
+    try:
+        # This would be implemented in database.py with team_volunteer_matches table
+        # For now, we'll use the existing volunteer_matches table
+        await database.save_volunteer_matches(user_id, team_matches)
+        print(f"✅ Saved {len(team_matches)} team matches for user {user_id}")
+    except Exception as e:
+        print(f"❌ Error saving team matches: {e}")
+
+async def save_team_preferences_to_db(user_id: str, preferences: Dict[str, Any]) -> bool:
+    """Save team preferences to database"""
+    try:
+        # This would be implemented in database.py with team_preferences table
+        # For now, we'll store in user_preferences with a prefix
+        team_prefs = {f"team_{k}": v for k, v in preferences.items()}
+        return await database.save_user_preferences(user_id, team_prefs)
+    except Exception as e:
+        print(f"❌ Error saving team preferences: {e}")
+        return False
+
+async def get_team_preferences_from_db(user_id: str) -> Optional[Dict[str, Any]]:
+    """Get team preferences from database"""
+    try:
+        # This would be implemented in database.py with team_preferences table
+        # For now, we'll get from user_preferences and filter team_ prefixed keys
+        prefs = await database.get_user_preferences(user_id)
+        if prefs and 'preferences_data' in prefs:
+            import json
+            data = json.loads(prefs['preferences_data']) if isinstance(prefs['preferences_data'], str) else prefs['preferences_data']
+            team_prefs = {k.replace('team_', ''): v for k, v in data.items() if k.startswith('team_')}
+            return team_prefs if team_prefs else None
+        return None
+    except Exception as e:
+        print(f"❌ Error getting team preferences: {e}")
+        return None
 
 # Run the application
 if __name__ == "__main__":
