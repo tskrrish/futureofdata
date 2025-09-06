@@ -1,0 +1,56 @@
+{
+  "header": {
+    "title": "YMCA Volunteer Dashboard",
+    "subtitle": "Belonging by Design — powered by VolunteerMatters data",
+    "exportRaw": "Export Raw"
+  },
+  "controls": {
+    "branch": "Branch",
+    "search": "Search",
+    "searchPlaceholder": "Find name, branch, date…"
+  },
+  "kpis": {
+    "totalHours": "Total Hours",
+    "activeVolunteers": "Active Volunteers",
+    "memberVolunteers": "Member Volunteers",
+    "avgHours": "Avg Hours / Active"
+  },
+  "tabs": {
+    "overview": "Overview",
+    "branches": "Branch Breakdown",
+    "people": "People & Badges",
+    "passport": "Belonging Passport"
+  },
+  "overview": {
+    "hoursDistribution": "Hours Distribution by Branch",
+    "monthlyTrend": "Monthly Trend",
+    "exportHours": "Export Hours Data"
+  },
+  "branches": {
+    "activesByBranch": "Active Volunteers by Branch",
+    "memberShare": "Member Share by Branch",
+    "exportActives": "Export Actives Data",
+    "exportMemberShare": "Export Member Share"
+  },
+  "people": {
+    "leaderboard": "Leaderboard",
+    "badgeDistribution": "Badge Distribution",
+    "hoursLabel": "hours",
+    "volunteers": "volunteers"
+  },
+  "passport": {
+    "comingSoon": "Coming Soon",
+    "description": "Belonging Passport features will help track and celebrate volunteer engagement across different activities and programs."
+  },
+  "footer": {
+    "text": "Built for YMCA Cincinnati — Hackathon: Platform for Belonging. Upload VolunteerMatters CSV/JSON above to power the dashboard."
+  },
+  "languageSelector": {
+    "label": "Language",
+    "english": "English",
+    "spanish": "Español",
+    "french": "Français",
+    "german": "Deutsch",
+    "chinese": "中文"
+  }
+}

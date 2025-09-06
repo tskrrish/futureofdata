@@ -1,0 +1,41 @@
+{
+  "welcome": {
+    "title": "Reconnaissance des Bénévoles YMCA",
+    "subtitle": "Appartenance par Design",
+    "subtitleEmphasis": "Construire la Plateforme pour la Communauté",
+    "story": "Alimenté par des bénévoles qui renforcent les liens intergénérationnels, améliorent la santé mentale et créent des opportunités d'emploi. L'appartenance est un problème de santé publique - la solitude équivaut à fumer 15 cigarettes par jour. Ensemble, nous suivons l'appartenance et l'impact à grande échelle.",
+    "searchHint": "↓ Recherchez un bénévole ci-dessous ↓"
+  },
+  "milestones": {
+    "hours": "Heures",
+    "tshirt": "(T-Shirt)",
+    "glassStar": "(Étoile de Verre)"
+  },
+  "search": {
+    "placeholder": "Tapez le nom du bénévole pour révéler sa carte...",
+    "button": "🔍",
+    "enterName": "Veuillez entrer un nom",
+    "notFound": "Bénévole non trouvé. Essayez \"Richard Bowman\" ou \"Christina Burke\"",
+    "serverError": "Erreur serveur - assurez-vous que le backend fonctionne sur le port 8080"
+  },
+  "badge": {
+    "hours": "Heures de Bénévolat",
+    "since": "Depuis",
+    "tier": "Niveau",
+    "basic": "Basique",
+    "bronze": "Bronze",
+    "silver": "Argent", 
+    "gold": "Or",
+    "diamond": "Diamant",
+    "legendary": "Légendaire",
+    "special": "Spécial"
+  },
+  "languageSelector": {
+    "label": "Langue",
+    "english": "English",
+    "spanish": "Español",
+    "french": "Français",
+    "german": "Deutsch",
+    "chinese": "中文"
+  }
+}

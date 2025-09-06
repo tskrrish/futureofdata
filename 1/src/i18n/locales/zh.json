@@ -1,0 +1,56 @@
+{
+  "header": {
+    "title": "YMCA 志愿者仪表板",
+    "subtitle": "归属感设计 — 由 VolunteerMatters 数据驱动",
+    "exportRaw": "导出数据"
+  },
+  "controls": {
+    "branch": "分支机构",
+    "search": "搜索",
+    "searchPlaceholder": "查找姓名、分支、日期..."
+  },
+  "kpis": {
+    "totalHours": "总小时数",
+    "activeVolunteers": "活跃志愿者",
+    "memberVolunteers": "会员志愿者",
+    "avgHours": "平均小时数/活跃"
+  },
+  "tabs": {
+    "overview": "概览",
+    "branches": "分支机构细分",
+    "people": "人员与徽章",
+    "passport": "归属护照"
+  },
+  "overview": {
+    "hoursDistribution": "各分支机构小时数分布",
+    "monthlyTrend": "月度趋势",
+    "exportHours": "导出小时数据"
+  },
+  "branches": {
+    "activesByBranch": "各分支机构活跃志愿者",
+    "memberShare": "各分支机构会员比例",
+    "exportActives": "导出活跃数据",
+    "exportMemberShare": "导出会员比例"
+  },
+  "people": {
+    "leaderboard": "排行榜",
+    "badgeDistribution": "徽章分布",
+    "hoursLabel": "小时",
+    "volunteers": "志愿者"
+  },
+  "passport": {
+    "comingSoon": "即将推出",
+    "description": "归属护照功能将帮助跟踪和庆祝志愿者在不同活动和项目中的参与。"
+  },
+  "footer": {
+    "text": "为 YMCA Cincinnati 构建 — 黑客松：归属感平台。请在上方上传 VolunteerMatters CSV/JSON 来为仪表板提供数据。"
+  },
+  "languageSelector": {
+    "label": "语言",
+    "english": "English",
+    "spanish": "Español",
+    "french": "Français",
+    "german": "Deutsch",
+    "chinese": "中文"
+  }
+}

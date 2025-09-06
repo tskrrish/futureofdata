@@ -1,0 +1,56 @@
+{
+  "header": {
+    "title": "YMCA Freiwilligen-Dashboard",
+    "subtitle": "Zugehörigkeit durch Design — unterstützt von VolunteerMatters-Daten",
+    "exportRaw": "Daten Exportieren"
+  },
+  "controls": {
+    "branch": "Filiale",
+    "search": "Suchen",
+    "searchPlaceholder": "Name, Filiale, Datum finden…"
+  },
+  "kpis": {
+    "totalHours": "Gesamtstunden",
+    "activeVolunteers": "Aktive Freiwillige",
+    "memberVolunteers": "Mitglieder-Freiwillige",
+    "avgHours": "Ø Stunden / Aktiv"
+  },
+  "tabs": {
+    "overview": "Übersicht",
+    "branches": "Filial-Aufschlüsselung",
+    "people": "Menschen & Abzeichen",
+    "passport": "Zugehörigkeits-Pass"
+  },
+  "overview": {
+    "hoursDistribution": "Stundenverteilung nach Filiale",
+    "monthlyTrend": "Monatlicher Trend",
+    "exportHours": "Stunden-Daten Exportieren"
+  },
+  "branches": {
+    "activesByBranch": "Aktive Freiwillige nach Filiale",
+    "memberShare": "Mitglieder-Anteil nach Filiale",
+    "exportActives": "Aktive-Daten Exportieren",
+    "exportMemberShare": "Mitglieder-Anteil Exportieren"
+  },
+  "people": {
+    "leaderboard": "Bestenliste",
+    "badgeDistribution": "Abzeichen-Verteilung",
+    "hoursLabel": "Stunden",
+    "volunteers": "Freiwillige"
+  },
+  "passport": {
+    "comingSoon": "Demnächst",
+    "description": "Die Zugehörigkeits-Pass-Funktionen helfen dabei, das Engagement von Freiwilligen in verschiedenen Aktivitäten und Programmen zu verfolgen und zu feiern."
+  },
+  "footer": {
+    "text": "Entwickelt für YMCA Cincinnati — Hackathon: Plattform für Zugehörigkeit. Laden Sie VolunteerMatters CSV/JSON oben hoch, um das Dashboard zu betreiben."
+  },
+  "languageSelector": {
+    "label": "Sprache",
+    "english": "English",
+    "spanish": "Español",
+    "french": "Français",
+    "german": "Deutsch",
+    "chinese": "中文"
+  }
+}

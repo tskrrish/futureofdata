@@ -1,6 +1,8 @@
 import { ArrowRight } from "lucide-react";
+import { useTranslation } from "react-i18next";
 
 export function PassportTab() {
+  const { t } = useTranslation();
   return (
     <div className="rounded-2xl border bg-white p-4 mt-4 space-y-4">
       <div className="flex items-center justify-between">
@@ -10,8 +12,7 @@ export function PassportTab() {
         </button>
       </div>
       <p className="text-sm text-neutral-600">
-        Recognize contributions and create belonging pathways. Earn badges at 10/25/50/100 hours, unlock roles
-        (Greeter → Lead Volunteer → Mentor), and surface perks (guest pass, merch, training credits).
+        {t('passport.description')}
       </p>
       <div className="grid md:grid-cols-3 gap-4">
         <div className="rounded-2xl border p-4 bg-white">

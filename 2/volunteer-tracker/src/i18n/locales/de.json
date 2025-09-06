@@ -1,0 +1,41 @@
+{
+  "welcome": {
+    "title": "YMCA Freiwilligen-Anerkennung",
+    "subtitle": "Zugehörigkeit durch Design",
+    "subtitleEmphasis": "Die Plattform für die Gemeinschaft aufbauen",
+    "story": "Angetrieben von Freiwilligen, die intergenerationelle Bindungen stärken, die geistige Gesundheit verbessern und Beschäftigungsmöglichkeiten schaffen. Zugehörigkeit ist ein öffentliches Gesundheitsproblem - Einsamkeit entspricht dem Rauchen von 15 Zigaretten pro Tag. Gemeinsam verfolgen wir Zugehörigkeit und Wirkung im großen Maßstab.",
+    "searchHint": "↓ Suchen Sie unten nach einem Freiwilligen ↓"
+  },
+  "milestones": {
+    "hours": "Stunden",
+    "tshirt": "(T-Shirt)",
+    "glassStar": "(Glas-Stern)"
+  },
+  "search": {
+    "placeholder": "Geben Sie den Namen des Freiwilligen ein, um seine Karte zu enthüllen...",
+    "button": "🔍",
+    "enterName": "Bitte geben Sie einen Namen ein",
+    "notFound": "Freiwilliger nicht gefunden. Versuchen Sie \"Richard Bowman\" oder \"Christina Burke\"",
+    "serverError": "Server-Fehler - stellen Sie sicher, dass das Backend auf Port 8080 läuft"
+  },
+  "badge": {
+    "hours": "Freiwilligen-Stunden",
+    "since": "Seit",
+    "tier": "Stufe",
+    "basic": "Basis",
+    "bronze": "Bronze",
+    "silver": "Silber", 
+    "gold": "Gold",
+    "diamond": "Diamant",
+    "legendary": "Legendär",
+    "special": "Speziell"
+  },
+  "languageSelector": {
+    "label": "Sprache",
+    "english": "English",
+    "spanish": "Español",
+    "french": "Français",
+    "german": "Deutsch",
+    "chinese": "中文"
+  }
+}
