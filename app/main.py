@@ -9,6 +9,14 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from shared_constants import (
+    MILESTONES,
+    MILESTONE_DETAILS,
+    REQUIRED_CSV_COLUMNS,
+    STORYWORLD_KEYWORDS,
+    compute_milestones,
+)
+
 
 DATA_PATH = Path(__file__).resolve().parent.parent / "Y_Volunteer_Raw_Data_Jan_August_2025.csv"
 
@@ -28,21 +36,6 @@ class VolunteerAggregate(BaseModel):
     branches: List[str]
 
 
-MILESTONES = [
-    (10, "First Impact"),
-    (25, "Service Star"),
-    (50, "Commitment Champion"),
-    (100, "Passion In Action Award"),
-    (500, "Guiding Light Award"),
-]
-
-MILESTONE_DETAILS = {
-    "First Impact": {"description": "Your journey begins", "reward": "Digital Badge"},
-    "Service Star": {"description": "Making a difference", "reward": "Digital Badge"},
-    "Commitment Champion": {"description": "Dedicated to service", "reward": "Digital Badge"},
-    "Passion In Action Award": {"description": "100+ hours of impact", "reward": "YMCA T-Shirt"},
-    "Guiding Light Award": {"description": "500+ hours of leadership", "reward": "Engraved Glass Star"},
-}
 
 
 def load_dataframe(csv_path: Path) -> pd.DataFrame:
@@ -50,18 +43,7 @@ def load_dataframe(csv_path: Path) -> pd.DataFrame:
         raise FileNotFoundError(f"CSV not found at {csv_path}")
     df = pd.read_csv(csv_path)
     # Normalize columns we rely on
-    expected_columns = {
-        "Date",
-        "First Name",
-        "Last Name",
-        "Email",
-        "Contact ID",
-        "Pledged",
-        "Fulfilled",
-        "Project",
-        "Project Tags",
-        "Branch",
-    }
+    expected_columns = REQUIRED_CSV_COLUMNS
     missing = expected_columns - set(df.columns)
     if missing:
         raise ValueError(f"CSV missing required columns: {sorted(missing)}")
@@ -98,12 +80,6 @@ def filter_date_range(df: pd.DataFrame, start: Optional[str], end: Optional[str]
     return df
 
 
-def compute_milestones(total_hours: float) -> List[str]:
-    unlocked: List[str] = []
-    for threshold, label in MILESTONES:
-        if total_hours >= threshold:
-            unlocked.append(label)
-    return unlocked
 
 
 def aggregate_by_volunteer(df: pd.DataFrame) -> List[VolunteerAggregate]:
@@ -115,21 +91,11 @@ def aggregate_by_volunteer(df: pd.DataFrame) -> List[VolunteerAggregate]:
         project = (row.get("Project") or "").lower()
         candidates = f"{tags} {project}"
         storyworlds: List[str] = []
-        # Youth Spark
-        if any(k in candidates for k in ["youth", "teen", "after-school", "after school", "camp", "child", "mentor", "education"]):
-            storyworlds.append("Youth Spark")
-        # Healthy Together
-        if any(k in candidates for k in ["healthy", "wellness", "group ex", "fitness", "health"]):
-            storyworlds.append("Healthy Together")
-        # Water & Wellness
-        if any(k in candidates for k in ["aquatics", "swim", "water", "lifeguard", "aerobics"]):
-            storyworlds.append("Water & Wellness")
-        # Neighbor Power
-        if any(k in candidates for k in ["community", "garden", "pantry", "outreach", "good neighbor", "bookshelf", "care team", "welcome desk", "branch support"]):
-            storyworlds.append("Neighbor Power")
-        # Sports
-        if any(k in candidates for k in ["sports", "basketball", "soccer", "coach", "referee", "flag football", "youth coaching"]):
-            storyworlds.append("Sports")
+        
+        for storyworld_name, keywords in STORYWORLD_KEYWORDS.items():
+            if any(keyword in candidates for keyword in keywords):
+                storyworlds.append(storyworld_name)
+        
         # Fallbacks based on Branch Support if no match
         if not storyworlds and "branch support" in candidates:
             storyworlds.append("Neighbor Power")

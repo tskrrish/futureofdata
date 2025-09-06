@@ -3,6 +3,7 @@ import confetti from 'canvas-confetti';
 import { playCheer, playDrumroll, playFanfare, playAmbientTone, playCardFlip, playMagicalSparkle } from './utils/audio.js';
 import Badge from './components/Badge.jsx';
 import CelebrationOverlay from './components/CelebrationOverlay.jsx';
+import { getTierForHours, MILESTONES } from './constants.js';
 
 function App() {
   const [searchTerm, setSearchTerm] = useState('');
@@ -71,11 +72,7 @@ function App() {
       const hours = Number(volunteerData.hours_total) || 0;
       
       // Get tier for musical theming
-      const tier = hours >= 200 ? 'legendary' : 
-                   hours >= 100 ? 'special' : 
-                   hours >= 50 ? 'rare' :
-                   hours >= 25 ? 'uncommon' :
-                   hours >= 10 ? 'common' : 'basic';
+      const tier = getTierForHours(hours);
       
       // Hide search bar for 10 seconds
       setHideSearchBar(true);
@@ -126,11 +123,15 @@ function App() {
               Together, we're tracking belonging and impact at scale.
             </div>
             <div className="milestone-preview">
-              <div className="milestone-tier">🥉 10+ Hours → First Impact</div>
-              <div className="milestone-tier">⭐ 25+ Hours → Service Star</div>
-              <div className="milestone-tier">🏆 50+ Hours → Commitment Champion</div>
-              <div className="milestone-tier">👕 100+ Hours → Passion In Action Award (T-Shirt)</div>
-              <div className="milestone-tier">⭐ 500+ Hours → Guiding Light Award (Glass Star)</div>
+              {MILESTONES.map((milestone, index) => {
+                const icons = ['🥉', '⭐', '🏆', '👕', '⭐']
+                const rewards = ['', '', '', ' (T-Shirt)', ' (Glass Star)']
+                return (
+                  <div key={milestone.label} className="milestone-tier">
+                    {icons[index]} {milestone.threshold}+ Hours → {milestone.label}{rewards[index]}
+                  </div>
+                )
+              })}
             </div>
             <div className="search-hint">↓ Search for a volunteer below ↓</div>
           </div>
@@ -160,8 +161,7 @@ function App() {
       <CelebrationOverlay 
         show={showOverlay} 
         seed={volunteerData ? `${volunteerData.first_name}${volunteerData.last_name}` : ''} 
-        tier={volunteerData && Number(volunteerData.hours_total) >= 200 ? 'legendary' : 
-              volunteerData && Number(volunteerData.hours_total) >= 100 ? 'special' : 'normal'} 
+        tier={volunteerData ? getTierForHours(Number(volunteerData.hours_total)) : 'basic'} 
       />
     </div>
   );
