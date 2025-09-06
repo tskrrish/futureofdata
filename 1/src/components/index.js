@@ -10,4 +10,7 @@ export { MemberShareChart } from "./charts/MemberShareChart";
 export { OverviewTab } from "./tabs/OverviewTab";
 export { BranchesTab } from "./tabs/BranchesTab";
 export { PeopleTab } from "./tabs/PeopleTab";
+export { ChurnRiskTab } from "./tabs/ChurnRiskTab";
 export { PassportTab } from "./tabs/PassportTab";
+
+export { NaturalLanguageQuery } from "./NaturalLanguageQuery";
