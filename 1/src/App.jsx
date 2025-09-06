@@ -13,6 +13,7 @@ import { OverviewTab } from "./components/tabs/OverviewTab";
 import { BranchesTab } from "./components/tabs/BranchesTab";
 import { PeopleTab } from "./components/tabs/PeopleTab";
 import { PassportTab } from "./components/tabs/PassportTab";
+import { ImpactTab } from "./components/tabs/ImpactTab";
 
 export default function App() {
   const [raw, setRaw] = useState(SAMPLE_DATA);
@@ -79,6 +80,7 @@ export default function App() {
             ["overview", "Overview"],
             ["branches", "Branch Breakdown"],
             ["people", "People & Badges"],
+            ["impact", "Impact Dashboard"],
             ["passport", "Belonging Passport"],
           ].map(([id, label]) => (
             <button
@@ -110,6 +112,10 @@ export default function App() {
 
         {tab === "people" && (
           <PeopleTab leaderboard={leaderboard} badges={badges} />
+        )}
+
+        {tab === "impact" && (
+          <ImpactTab totalHours={totalHours} activeVolunteersCount={activeVolunteersCount} />
         )}
 
         {tab === "passport" && <PassportTab />}
