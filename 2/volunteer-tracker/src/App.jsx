@@ -4,6 +4,7 @@ import { playCheer, playDrumroll, playFanfare, playAmbientTone, playCardFlip, pl
 import Badge from './components/Badge.jsx';
 import CelebrationOverlay from './components/CelebrationOverlay.jsx';
 import { getTierForHours, MILESTONES } from './constants.js';
+import { exportVolunteerPassportPDF } from './utils/pdfExport.js';
 
 function App() {
   const [searchTerm, setSearchTerm] = useState('');
@@ -12,6 +13,8 @@ function App() {
   const firedRef = useRef(false);
   const [showOverlay, setShowOverlay] = useState(false);
   const [hideSearchBar, setHideSearchBar] = useState(false);
+  const badgeRef = useRef(null);
+  const [isExporting, setIsExporting] = useState(false);
 
   function runFullScreenConfetti(hours) {
     const duration = Math.min(9000, 4000 + hours * 40);
@@ -32,6 +35,20 @@ function App() {
       confetti(Object.assign({}, defaults, { particleCount: Math.round(particleCount / 2), angle: 120, origin: { x: 1 } }));
     }, 120);
   }
+
+  const handleExportPDF = async () => {
+    if (!volunteerData || !badgeRef.current) return;
+    
+    setIsExporting(true);
+    try {
+      await exportVolunteerPassportPDF(volunteerData, badgeRef);
+    } catch (error) {
+      console.error('Export failed:', error);
+      setError('Failed to export PDF. Please try again.');
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   const handleSearch = async () => {
     setError('');
@@ -109,7 +126,18 @@ function App() {
       <div className="card-stage">
         {volunteerData ? (
           <div className="full-card-display">
-            <Badge volunteer={volunteerData} />
+            <div ref={badgeRef}>
+              <Badge volunteer={volunteerData} />
+            </div>
+            <div className="export-controls">
+              <button 
+                className="export-button"
+                onClick={handleExportPDF}
+                disabled={isExporting}
+              >
+                {isExporting ? '📄 Generating PDF...' : '📄 Export Passport PDF'}
+              </button>
+            </div>
           </div>
         ) : (
           <div className="welcome-state">
