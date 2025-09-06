@@ -28,4 +28,10 @@ class Settings:
 
     VOLUNTEER_DATA_PATH: str = 'Y Volunteer Raw Data - Jan- August 2025.xlsx'
 
+    # Twilio SMS Configuration
+    TWILIO_ACCOUNT_SID: str = os.getenv('TWILIO_ACCOUNT_SID', '')
+    TWILIO_AUTH_TOKEN: str = os.getenv('TWILIO_AUTH_TOKEN', '')
+    TWILIO_PHONE_NUMBER: str = os.getenv('TWILIO_PHONE_NUMBER', '')
+    SMS_WEBHOOK_URL: str = os.getenv('SMS_WEBHOOK_URL', 'http://localhost:8000/webhooks/sms')
+
 settings = Settings()

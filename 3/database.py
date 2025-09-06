@@ -158,8 +158,56 @@ class VolunteerDatabase:
         );
         """
         
+        # SMS messages table
+        sms_messages_sql = """
+        CREATE TABLE IF NOT EXISTS sms_messages (
+            id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+            user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+            phone_number VARCHAR(20),
+            message_content TEXT,
+            sms_type VARCHAR(30), -- 'reminder', 'confirmation', 'welcome', 'follow_up', 'keyword_response'
+            direction VARCHAR(10), -- 'inbound', 'outbound'  
+            status VARCHAR(20), -- 'sent', 'received', 'failed', 'delivered'
+            twilio_sid VARCHAR(100),
+            error_message TEXT,
+            metadata JSONB,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+        """
+        
+        # SMS reminders/schedule table
+        sms_reminders_sql = """
+        CREATE TABLE IF NOT EXISTS sms_reminders (
+            id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+            user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+            phone_number VARCHAR(20),
+            reminder_type VARCHAR(30),
+            opportunity_data JSONB,
+            scheduled_for TIMESTAMP WITH TIME ZONE,
+            sent_at TIMESTAMP WITH TIME ZONE,
+            status VARCHAR(20) DEFAULT 'scheduled', -- 'scheduled', 'sent', 'failed', 'cancelled'
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+        """
+        
+        # SMS preferences table
+        sms_preferences_sql = """
+        CREATE TABLE IF NOT EXISTS sms_preferences (
+            id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+            user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+            phone_number VARCHAR(20),
+            is_subscribed BOOLEAN DEFAULT TRUE,
+            preferences JSONB, -- reminder types, frequency, etc.
+            unsubscribed_at TIMESTAMP WITH TIME ZONE,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+        """
+        
         # Execute table creation (Note: In production, use proper migrations)
-        tables = [users_sql, preferences_sql, conversations_sql, messages_sql, matches_sql, feedback_sql, analytics_sql]
+        tables = [users_sql, preferences_sql, conversations_sql, messages_sql, matches_sql, feedback_sql, analytics_sql, sms_messages_sql, sms_reminders_sql, sms_preferences_sql]
         
         print("🗄️  Setting up database tables...")
         for sql in tables:
@@ -527,6 +575,227 @@ class VolunteerDatabase:
             return tables
         except Exception as e:
             print(f"❌ Error exporting data: {e}")
+            return {}
+    
+    # SMS-specific methods
+    async def save_sms_message(self, user_id: str, phone_number: str, message_content: str,
+                              sms_type: str, direction: str = "outbound", status: str = "sent",
+                              twilio_sid: str = None, error_message: str = None,
+                              metadata: Dict[str, Any] = None) -> bool:
+        """Save SMS message to database"""
+        if not self._is_available():
+            logger.warning("Database not available, skipping SMS log")
+            return False
+            
+        try:
+            sms_data = {
+                'user_id': user_id,
+                'phone_number': phone_number,
+                'message_content': message_content,
+                'sms_type': sms_type,
+                'direction': direction,
+                'status': status,
+                'twilio_sid': twilio_sid,
+                'error_message': error_message,
+                'metadata': json.dumps(metadata or {}),
+                'created_at': datetime.now().isoformat()
+            }
+            
+            result = self.supabase.table('sms_messages').insert(sms_data).execute()
+            return len(result.data) > 0
+        except Exception as e:
+            print(f"❌ Error saving SMS message: {e}")
+            return False
+    
+    async def get_sms_history(self, user_id: str = None, phone_number: str = None, 
+                             limit: int = 50) -> List[Dict[str, Any]]:
+        """Get SMS message history"""
+        try:
+            query = self.supabase.table('sms_messages').select('*')
+            
+            if user_id:
+                query = query.eq('user_id', user_id)
+            elif phone_number:
+                query = query.eq('phone_number', phone_number)
+            else:
+                return []
+            
+            result = query.order('created_at', desc=True).limit(limit).execute()
+            
+            messages = []
+            for msg in result.data:
+                if msg.get('metadata'):
+                    msg['metadata'] = json.loads(msg['metadata'])
+                messages.append(msg)
+            
+            return messages
+        except Exception as e:
+            print(f"❌ Error getting SMS history: {e}")
+            return []
+    
+    async def save_sms_reminder(self, user_id: str, phone_number: str, reminder_type: str,
+                               opportunity_data: Dict[str, Any], scheduled_for: datetime) -> bool:
+        """Save scheduled SMS reminder"""
+        try:
+            reminder_data = {
+                'user_id': user_id,
+                'phone_number': phone_number,
+                'reminder_type': reminder_type,
+                'opportunity_data': json.dumps(opportunity_data),
+                'scheduled_for': scheduled_for.isoformat(),
+                'status': 'scheduled',
+                'created_at': datetime.now().isoformat()
+            }
+            
+            result = self.supabase.table('sms_reminders').insert(reminder_data).execute()
+            return len(result.data) > 0
+        except Exception as e:
+            print(f"❌ Error saving SMS reminder: {e}")
+            return False
+    
+    async def get_pending_reminders(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """Get pending SMS reminders that need to be sent"""
+        try:
+            now = datetime.now().isoformat()
+            
+            result = self.supabase.table('sms_reminders')\
+                .select('*')\
+                .eq('status', 'scheduled')\
+                .lte('scheduled_for', now)\
+                .limit(limit)\
+                .execute()
+            
+            reminders = []
+            for reminder in result.data:
+                if reminder.get('opportunity_data'):
+                    reminder['opportunity_data'] = json.loads(reminder['opportunity_data'])
+                reminders.append(reminder)
+            
+            return reminders
+        except Exception as e:
+            print(f"❌ Error getting pending reminders: {e}")
+            return []
+    
+    async def update_reminder_status(self, reminder_id: str, status: str, sent_at: datetime = None) -> bool:
+        """Update SMS reminder status"""
+        try:
+            update_data = {
+                'status': status,
+                'updated_at': datetime.now().isoformat()
+            }
+            
+            if sent_at:
+                update_data['sent_at'] = sent_at.isoformat()
+            
+            result = self.supabase.table('sms_reminders')\
+                .update(update_data)\
+                .eq('id', reminder_id)\
+                .execute()
+            
+            return len(result.data) > 0
+        except Exception as e:
+            print(f"❌ Error updating reminder status: {e}")
+            return False
+    
+    async def save_sms_preferences(self, user_id: str, phone_number: str, 
+                                  is_subscribed: bool = True, preferences: Dict[str, Any] = None) -> bool:
+        """Save or update SMS preferences for a user"""
+        try:
+            # Check if preferences exist
+            existing = self.supabase.table('sms_preferences').eq('user_id', user_id).execute()
+            
+            preference_data = {
+                'user_id': user_id,
+                'phone_number': phone_number,
+                'is_subscribed': is_subscribed,
+                'preferences': json.dumps(preferences or {}),
+                'updated_at': datetime.now().isoformat()
+            }
+            
+            if not is_subscribed:
+                preference_data['unsubscribed_at'] = datetime.now().isoformat()
+            else:
+                preference_data['unsubscribed_at'] = None
+            
+            if existing.data:
+                # Update existing
+                result = self.supabase.table('sms_preferences').update(preference_data).eq('user_id', user_id).execute()
+            else:
+                # Create new
+                preference_data['created_at'] = datetime.now().isoformat()
+                result = self.supabase.table('sms_preferences').insert(preference_data).execute()
+            
+            return len(result.data) > 0
+        except Exception as e:
+            print(f"❌ Error saving SMS preferences: {e}")
+            return False
+    
+    async def get_sms_preferences(self, user_id: str = None, phone_number: str = None) -> Optional[Dict[str, Any]]:
+        """Get SMS preferences for a user"""
+        try:
+            query = self.supabase.table('sms_preferences')
+            
+            if user_id:
+                query = query.eq('user_id', user_id)
+            elif phone_number:
+                query = query.eq('phone_number', phone_number)
+            else:
+                return None
+            
+            result = query.execute()
+            
+            if result.data:
+                prefs = result.data[0]
+                if prefs.get('preferences'):
+                    prefs['preferences'] = json.loads(prefs['preferences'])
+                return prefs
+            return None
+        except Exception as e:
+            print(f"❌ Error getting SMS preferences: {e}")
+            return None
+    
+    async def get_sms_analytics(self, days: int = 30) -> Dict[str, Any]:
+        """Get SMS usage analytics"""
+        try:
+            start_date = (datetime.now() - timedelta(days=days)).isoformat()
+            
+            # Total SMS sent
+            sent_result = self.supabase.table('sms_messages')\
+                .select('id', count='exact')\
+                .eq('direction', 'outbound')\
+                .gte('created_at', start_date)\
+                .execute()
+            
+            # Total SMS received
+            received_result = self.supabase.table('sms_messages')\
+                .select('id', count='exact')\
+                .eq('direction', 'inbound')\
+                .gte('created_at', start_date)\
+                .execute()
+            
+            # Reminders sent
+            reminders_result = self.supabase.table('sms_reminders')\
+                .select('id', count='exact')\
+                .eq('status', 'sent')\
+                .gte('sent_at', start_date)\
+                .execute()
+            
+            # Active subscribers
+            subscribers_result = self.supabase.table('sms_preferences')\
+                .select('id', count='exact')\
+                .eq('is_subscribed', True)\
+                .execute()
+            
+            return {
+                'period_days': days,
+                'messages_sent': sent_result.count,
+                'messages_received': received_result.count,
+                'reminders_sent': reminders_result.count,
+                'active_subscribers': subscribers_result.count,
+                'generated_at': datetime.now().isoformat()
+            }
+        except Exception as e:
+            print(f"❌ Error getting SMS analytics: {e}")
             return {}
 
 # Usage example and testing

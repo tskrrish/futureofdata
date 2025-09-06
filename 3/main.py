@@ -20,6 +20,7 @@ from ai_assistant import VolunteerAIAssistant
 from matching_engine import VolunteerMatchingEngine
 from data_processor import VolunteerDataProcessor
 from database import VolunteerDatabase
+from sms_service import SMSService
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -41,6 +42,7 @@ app.add_middleware(
 # Global instances
 ai_assistant = VolunteerAIAssistant()
 database = VolunteerDatabase()
+sms_service = SMSService()
 volunteer_data = None
 matching_engine = None
 
@@ -77,6 +79,25 @@ class FeedbackData(BaseModel):
     rating: Optional[int] = None
     feedback_text: str = ""
     feedback_type: str = "general"
+
+class SMSRequest(BaseModel):
+    phone: str
+    message: str
+    user_id: Optional[str] = None
+    sms_type: str = "reminder"
+
+class SMSReminderRequest(BaseModel):
+    user_id: str
+    phone: str
+    opportunity: Dict[str, Any]
+    send_at: Optional[str] = None  # ISO datetime string
+
+class SMSWebhookData(BaseModel):
+    MessageSid: Optional[str] = None
+    From: Optional[str] = None
+    To: Optional[str] = None
+    Body: Optional[str] = None
+    AccountSid: Optional[str] = None
 
 # Initialize data on startup
 @app.on_event("startup")
@@ -677,6 +698,263 @@ async def get_resources() -> JSONResponse:
     }
     
     return JSONResponse(content=resources)
+
+# SMS Endpoints
+@app.post("/api/sms/send")
+async def send_sms(sms_request: SMSRequest) -> JSONResponse:
+    """Send SMS message"""
+    
+    try:
+        from sms_service import SMSType
+        
+        # Convert string to enum
+        sms_type = SMSType.REMINDER
+        if sms_request.sms_type == "confirmation":
+            sms_type = SMSType.CONFIRMATION
+        elif sms_request.sms_type == "welcome":
+            sms_type = SMSType.WELCOME
+        elif sms_request.sms_type == "follow_up":
+            sms_type = SMSType.FOLLOW_UP
+        
+        result = await sms_service.send_sms(
+            to_phone=sms_request.phone,
+            message=sms_request.message,
+            sms_type=sms_type,
+            user_id=sms_request.user_id
+        )
+        
+        return JSONResponse(content=result)
+        
+    except Exception as e:
+        print(f"❌ SMS send error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to send SMS")
+
+@app.post("/api/sms/reminder")
+async def send_reminder(reminder_request: SMSReminderRequest) -> JSONResponse:
+    """Send volunteer reminder SMS"""
+    
+    try:
+        result = await sms_service.send_volunteer_reminder(
+            user_id=reminder_request.user_id,
+            phone=reminder_request.phone,
+            volunteer_opportunity=reminder_request.opportunity
+        )
+        
+        if result["success"]:
+            # Track reminder sent
+            await database.track_event(
+                "reminder_sent",
+                {
+                    "phone": reminder_request.phone,
+                    "opportunity": reminder_request.opportunity
+                },
+                reminder_request.user_id
+            )
+        
+        return JSONResponse(content=result)
+        
+    except Exception as e:
+        print(f"❌ Reminder error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to send reminder")
+
+@app.post("/api/sms/confirmation")
+async def send_confirmation(user_id: str, phone: str, event_details: Dict[str, Any]) -> JSONResponse:
+    """Send confirmation request SMS"""
+    
+    try:
+        result = await sms_service.send_confirmation_request(
+            user_id=user_id,
+            phone=phone,
+            event_details=event_details
+        )
+        
+        return JSONResponse(content=result)
+        
+    except Exception as e:
+        print(f"❌ Confirmation error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to send confirmation")
+
+@app.post("/api/sms/welcome")
+async def send_welcome(user_id: str, phone: str, user_name: str = None) -> JSONResponse:
+    """Send welcome SMS to new volunteer"""
+    
+    try:
+        result = await sms_service.send_welcome_message(
+            user_id=user_id,
+            phone=phone,
+            user_name=user_name
+        )
+        
+        return JSONResponse(content=result)
+        
+    except Exception as e:
+        print(f"❌ Welcome SMS error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to send welcome SMS")
+
+@app.post("/webhooks/sms")
+async def sms_webhook(request: SMSWebhookData) -> JSONResponse:
+    """Webhook endpoint for incoming Twilio SMS messages"""
+    
+    try:
+        # Process the incoming SMS
+        result = await sms_service.process_incoming_sms(
+            from_phone=request.From,
+            message_body=request.Body,
+            twilio_sid=request.MessageSid
+        )
+        
+        # Log webhook processing
+        await database.track_event(
+            "sms_webhook_processed",
+            {
+                "from": request.From,
+                "message_sid": request.MessageSid,
+                "success": result["success"],
+                "action_taken": result.get("action_taken")
+            }
+        )
+        
+        return JSONResponse(content={"status": "processed", "result": result})
+        
+    except Exception as e:
+        print(f"❌ SMS webhook error: {e}")
+        
+        # Log webhook error
+        await database.track_event(
+            "sms_webhook_error",
+            {
+                "from": request.From,
+                "message_sid": request.MessageSid,
+                "error": str(e)
+            }
+        )
+        
+        return JSONResponse(content={"status": "error", "message": str(e)}, status_code=500)
+
+@app.get("/webhooks/sms")
+async def sms_webhook_get():
+    """GET endpoint for SMS webhook verification"""
+    return JSONResponse(content={"status": "SMS webhook endpoint active"})
+
+# SMS Analytics and History
+@app.get("/api/sms/analytics")
+async def get_sms_analytics(days: int = 30) -> JSONResponse:
+    """Get SMS usage analytics"""
+    
+    try:
+        analytics = await database.get_sms_analytics(days)
+        
+        return JSONResponse(content=analytics)
+        
+    except Exception as e:
+        print(f"❌ SMS analytics error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get SMS analytics")
+
+@app.get("/api/sms/history/{user_id}")
+async def get_sms_history(user_id: str, limit: int = 50) -> JSONResponse:
+    """Get SMS history for a user"""
+    
+    try:
+        history = await database.get_sms_history(user_id=user_id, limit=limit)
+        
+        return JSONResponse(content={"history": history, "count": len(history)})
+        
+    except Exception as e:
+        print(f"❌ SMS history error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get SMS history")
+
+@app.get("/api/sms/preferences/{user_id}")
+async def get_sms_preferences(user_id: str) -> JSONResponse:
+    """Get SMS preferences for a user"""
+    
+    try:
+        preferences = await database.get_sms_preferences(user_id=user_id)
+        
+        if preferences:
+            return JSONResponse(content=preferences)
+        else:
+            return JSONResponse(content={"is_subscribed": True, "preferences": {}})
+        
+    except Exception as e:
+        print(f"❌ SMS preferences error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get SMS preferences")
+
+@app.post("/api/sms/preferences/{user_id}")
+async def update_sms_preferences(user_id: str, is_subscribed: bool = True, preferences: Dict[str, Any] = None) -> JSONResponse:
+    """Update SMS preferences for a user"""
+    
+    try:
+        # Get user to get phone number
+        user = await database.get_user(user_id=user_id)
+        if not user or not user.get('phone'):
+            raise HTTPException(status_code=404, detail="User not found or no phone number")
+        
+        success = await database.save_sms_preferences(
+            user_id=user_id,
+            phone_number=user['phone'],
+            is_subscribed=is_subscribed,
+            preferences=preferences or {}
+        )
+        
+        if success:
+            # Track preference update
+            await database.track_event(
+                "sms_preferences_updated",
+                {
+                    "is_subscribed": is_subscribed,
+                    "preferences": preferences
+                },
+                user_id
+            )
+            
+            return JSONResponse(content={"success": True, "is_subscribed": is_subscribed})
+        else:
+            raise HTTPException(status_code=400, detail="Failed to update preferences")
+        
+    except Exception as e:
+        print(f"❌ SMS preferences update error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to update SMS preferences")
+
+# Enhanced user creation with SMS welcome
+@app.post("/api/users/with-sms")
+async def create_user_with_sms(user_data: UserProfile) -> JSONResponse:
+    """Create a new user profile and send welcome SMS if phone provided"""
+    
+    try:
+        user = await database.create_user(user_data.dict(exclude_unset=True))
+        
+        if user:
+            user_id = user['id']
+            
+            # Send welcome SMS if phone number provided
+            if user_data.phone:
+                welcome_name = f"{user_data.first_name or ''} {user_data.last_name or ''}".strip()
+                sms_result = await sms_service.send_welcome_message(
+                    user_id=user_id,
+                    phone=user_data.phone,
+                    user_name=welcome_name or None
+                )
+                
+                user['sms_welcome_sent'] = sms_result.get('success', False)
+            
+            # Track user creation
+            await database.track_event(
+                "user_created_with_sms",
+                {
+                    "source": "api",
+                    "sms_enabled": user_data.phone is not None,
+                    "sms_sent": user.get('sms_welcome_sent', False)
+                },
+                user_id
+            )
+            
+            return JSONResponse(content={"user": user, "success": True})
+        else:
+            raise HTTPException(status_code=400, detail="Failed to create user")
+            
+    except Exception as e:
+        print(f"❌ User creation with SMS error: {e}")
+        raise HTTPException(status_code=500, detail="User creation failed")
 
 # Main web interface
 @app.get("/", response_class=HTMLResponse)
