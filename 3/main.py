@@ -145,6 +145,14 @@ async def chat_page():
         return FileResponse(file_path)
     return HTMLResponse("<h3>Chat UI not found. Create static/chat.html</h3>", status_code=404)
 
+# Serve marketplace UI
+@app.get("/marketplace", response_class=HTMLResponse)
+async def marketplace_page():
+    file_path = os.path.join(os.path.dirname(__file__), "static", "marketplace.html")
+    if os.path.exists(file_path):
+        return FileResponse(file_path)
+    return HTMLResponse("<h3>Marketplace UI not found.</h3>", status_code=404)
+
 class ProfileRequest(BaseModel):
     name: str
 
@@ -348,6 +356,357 @@ async def get_profile_analysis(req: ProfileRequest) -> JSONResponse:
     except Exception:
         pass
     return JSONResponse(content=profile_payload)
+
+# Opportunity Marketplace API endpoints
+@app.get("/api/marketplace/opportunities")
+async def get_marketplace_opportunities(
+    category: Optional[str] = None,
+    branch: Optional[str] = None,
+    min_hours: Optional[float] = None,
+    max_hours: Optional[float] = None,
+    time_commitment: Optional[int] = None,
+    skills_required: Optional[str] = None,
+    user_id: Optional[str] = None,
+    page: int = 1,
+    limit: int = 20
+) -> JSONResponse:
+    """Get filtered and personalized opportunities from the marketplace"""
+    
+    if volunteer_data is None or matching_engine is None:
+        raise HTTPException(status_code=503, detail="Marketplace service not available")
+    
+    try:
+        # Get all opportunities
+        opportunities = volunteer_data.get('projects')
+        if opportunities is None or opportunities.empty:
+            return JSONResponse(content={"opportunities": [], "total": 0, "page": page})
+        
+        # Apply filters
+        filtered_opportunities = opportunities.copy()
+        
+        if category:
+            filtered_opportunities = filtered_opportunities[
+                filtered_opportunities['category'].str.contains(category, case=False, na=False)
+            ]
+        
+        if branch:
+            filtered_opportunities = filtered_opportunities[
+                filtered_opportunities['branch'].str.contains(branch, case=False, na=False)
+            ]
+        
+        if min_hours is not None:
+            filtered_opportunities = filtered_opportunities[
+                filtered_opportunities['avg_hours_per_session'] >= min_hours
+            ]
+        
+        if max_hours is not None:
+            filtered_opportunities = filtered_opportunities[
+                filtered_opportunities['avg_hours_per_session'] <= max_hours
+            ]
+        
+        if time_commitment is not None:
+            # Map time commitment to hours
+            commitment_ranges = {1: (0, 2), 2: (2, 4), 3: (4, float('inf'))}
+            min_h, max_h = commitment_ranges.get(time_commitment, (0, float('inf')))
+            filtered_opportunities = filtered_opportunities[
+                (filtered_opportunities['avg_hours_per_session'] >= min_h) &
+                (filtered_opportunities['avg_hours_per_session'] < max_h)
+            ]
+        
+        if skills_required:
+            filtered_opportunities = filtered_opportunities[
+                filtered_opportunities['required_credentials'].str.contains(skills_required, case=False, na=False)
+            ]
+        
+        # Get personalized ranking if user_id provided
+        ranked_opportunities = []
+        for _, opportunity in filtered_opportunities.iterrows():
+            opp_dict = opportunity.to_dict()
+            
+            # Add personalized score if user available
+            personalized_score = 0.5  # Default score
+            if user_id and matching_engine:
+                try:
+                    user_prefs = await database.get_user_preferences(user_id)
+                    if user_prefs:
+                        user_vector = matching_engine._create_user_vector(user_prefs.get('preferences_data', {}))
+                        personalized_score = matching_engine._calculate_match_score(
+                            user_vector, opportunity, user_prefs.get('preferences_data', {})
+                        )
+                except:
+                    pass
+            
+            # Add marketplace-specific fields
+            opp_dict.update({
+                'personalized_score': personalized_score,
+                'application_count': 0,  # Would track applications in real system
+                'urgency_level': 'medium',  # Would be based on actual need
+                'last_updated': datetime.now().isoformat(),
+                'is_featured': opp_dict.get('unique_volunteers', 0) > 10
+            })
+            
+            ranked_opportunities.append(opp_dict)
+        
+        # Sort by personalized score if user provided, otherwise by popularity
+        if user_id:
+            ranked_opportunities.sort(key=lambda x: x['personalized_score'], reverse=True)
+        else:
+            ranked_opportunities.sort(key=lambda x: x.get('unique_volunteers', 0), reverse=True)
+        
+        # Pagination
+        total = len(ranked_opportunities)
+        start_idx = (page - 1) * limit
+        end_idx = start_idx + limit
+        paginated_opportunities = ranked_opportunities[start_idx:end_idx]
+        
+        return JSONResponse(content={
+            "opportunities": paginated_opportunities,
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "has_next": end_idx < total,
+            "has_prev": page > 1,
+            "personalized": user_id is not None
+        })
+        
+    except Exception as e:
+        print(f"❌ Marketplace error: {e}")
+        raise HTTPException(status_code=500, detail="Marketplace service temporarily unavailable")
+
+@app.get("/api/marketplace/filters")
+async def get_marketplace_filters() -> JSONResponse:
+    """Get available filter options for the marketplace"""
+    
+    if volunteer_data is None:
+        raise HTTPException(status_code=503, detail="Marketplace service not available")
+    
+    try:
+        opportunities = volunteer_data.get('projects')
+        if opportunities is None or opportunities.empty:
+            return JSONResponse(content={"filters": {}})
+        
+        # Extract unique filter values
+        categories = opportunities['category'].dropna().unique().tolist()
+        branches = opportunities['branch'].dropna().unique().tolist()
+        
+        # Time commitment ranges
+        time_commitments = [
+            {"value": 1, "label": "Light (0-2 hours)", "description": "Perfect for busy schedules"},
+            {"value": 2, "label": "Moderate (2-4 hours)", "description": "Regular commitment"},
+            {"value": 3, "label": "High (4+ hours)", "description": "Deep involvement opportunities"}
+        ]
+        
+        # Skills categories
+        skills = opportunities['required_credentials'].dropna().unique().tolist()
+        
+        return JSONResponse(content={
+            "filters": {
+                "categories": sorted(categories),
+                "branches": sorted(branches),
+                "time_commitments": time_commitments,
+                "skills": sorted(skills),
+                "hours_range": {
+                    "min": float(opportunities['avg_hours_per_session'].min()),
+                    "max": float(opportunities['avg_hours_per_session'].max())
+                }
+            }
+        })
+        
+    except Exception as e:
+        print(f"❌ Filter options error: {e}")
+        raise HTTPException(status_code=500, detail="Filter options not available")
+
+@app.get("/api/marketplace/featured")
+async def get_featured_opportunities(limit: int = 6) -> JSONResponse:
+    """Get featured opportunities for the marketplace homepage"""
+    
+    if volunteer_data is None:
+        raise HTTPException(status_code=503, detail="Marketplace service not available")
+    
+    try:
+        opportunities = volunteer_data.get('projects')
+        if opportunities is None or opportunities.empty:
+            return JSONResponse(content={"featured": []})
+        
+        # Select featured opportunities based on popularity and diversity
+        featured = opportunities.nlargest(limit * 2, 'unique_volunteers')
+        
+        # Ensure diversity in categories
+        category_counts = {}
+        selected_opportunities = []
+        
+        for _, opp in featured.iterrows():
+            category = opp['category']
+            if category_counts.get(category, 0) < 2 and len(selected_opportunities) < limit:
+                category_counts[category] = category_counts.get(category, 0) + 1
+                selected_opportunities.append(opp.to_dict())
+        
+        return JSONResponse(content={"featured": selected_opportunities})
+        
+    except Exception as e:
+        print(f"❌ Featured opportunities error: {e}")
+        raise HTTPException(status_code=500, detail="Featured opportunities not available")
+
+@app.post("/api/marketplace/apply")
+async def apply_to_opportunity(
+    application_data: Dict[str, Any],
+    user_id: Optional[str] = None
+) -> JSONResponse:
+    """Apply to a volunteer opportunity"""
+    
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User authentication required")
+    
+    try:
+        project_id = application_data.get('project_id')
+        message = application_data.get('message', '')
+        availability = application_data.get('availability', {})
+        
+        if not project_id:
+            raise HTTPException(status_code=400, detail="Project ID required")
+        
+        # Save application to database
+        application_id = await database.save_application(user_id, {
+            'project_id': project_id,
+            'message': message,
+            'availability': availability
+        })
+        
+        success = application_id is not None
+        
+        if success:
+            # Update match status if exists
+            user_matches = await database.get_user_matches(user_id)
+            for match in user_matches:
+                if match.get('project_id') == project_id:
+                    await database.update_match_status(match['id'], 'applied')
+                    break
+            
+            return JSONResponse(content={
+                "success": True,
+                "message": "Application submitted successfully",
+                "application_id": application_id,
+                "next_steps": [
+                    "You will receive a confirmation email shortly",
+                    "Branch staff will review your application",
+                    "Expect to hear back within 3-5 business days"
+                ]
+            })
+        else:
+            raise HTTPException(status_code=500, detail="Failed to submit application")
+        
+    except Exception as e:
+        print(f"❌ Application error: {e}")
+        raise HTTPException(status_code=500, detail="Application submission failed")
+
+@app.get("/api/marketplace/search")
+async def search_opportunities(
+    q: str,
+    user_id: Optional[str] = None,
+    limit: int = 10
+) -> JSONResponse:
+    """Search opportunities by keyword"""
+    
+    if volunteer_data is None:
+        raise HTTPException(status_code=503, detail="Search service not available")
+    
+    try:
+        opportunities = volunteer_data.get('projects')
+        if opportunities is None or opportunities.empty:
+            return JSONResponse(content={"results": [], "query": q})
+        
+        # Search in project name, category, and description fields
+        search_fields = ['project_name', 'category', 'need', 'sample_activities']
+        search_results = []
+        
+        query_lower = q.lower()
+        
+        for _, opp in opportunities.iterrows():
+            relevance_score = 0
+            matched_fields = []
+            
+            for field in search_fields:
+                field_value = str(opp.get(field, '')).lower()
+                if query_lower in field_value:
+                    relevance_score += 1
+                    matched_fields.append(field)
+            
+            if relevance_score > 0:
+                opp_dict = opp.to_dict()
+                opp_dict.update({
+                    'relevance_score': relevance_score,
+                    'matched_fields': matched_fields,
+                    'search_snippet': str(opp.get('need', ''))[:200] + '...'
+                })
+                search_results.append(opp_dict)
+        
+        # Sort by relevance
+        search_results.sort(key=lambda x: x['relevance_score'], reverse=True)
+        
+        return JSONResponse(content={
+            "results": search_results[:limit],
+            "query": q,
+            "total_found": len(search_results)
+        })
+        
+    except Exception as e:
+        print(f"❌ Search error: {e}")
+        raise HTTPException(status_code=500, detail="Search service temporarily unavailable")
+
+@app.get("/api/marketplace/similar/{opportunity_id}")
+async def get_similar_opportunities(opportunity_id: int, limit: int = 5) -> JSONResponse:
+    """Get opportunities similar to a specific one"""
+    
+    if matching_engine is None:
+        raise HTTPException(status_code=503, detail="Matching service not available")
+    
+    try:
+        similar = matching_engine.get_similar_opportunities(opportunity_id, limit)
+        return JSONResponse(content={"similar_opportunities": similar})
+        
+    except Exception as e:
+        print(f"❌ Similar opportunities error: {e}")
+        raise HTTPException(status_code=500, detail="Similar opportunities service not available")
+
+@app.get("/api/marketplace/stats")
+async def get_marketplace_stats() -> JSONResponse:
+    """Get marketplace statistics and insights"""
+    
+    if volunteer_data is None:
+        raise HTTPException(status_code=503, detail="Stats service not available")
+    
+    try:
+        opportunities = volunteer_data.get('projects')
+        if opportunities is None or opportunities.empty:
+            return JSONResponse(content={"stats": {}})
+        
+        stats = {
+            "total_opportunities": len(opportunities),
+            "categories": {
+                "count": opportunities['category'].nunique(),
+                "distribution": opportunities['category'].value_counts().to_dict()
+            },
+            "branches": {
+                "count": opportunities['branch'].nunique(), 
+                "distribution": opportunities['branch'].value_counts().to_dict()
+            },
+            "time_commitments": {
+                "avg_hours": float(opportunities['avg_hours_per_session'].mean()),
+                "min_hours": float(opportunities['avg_hours_per_session'].min()),
+                "max_hours": float(opportunities['avg_hours_per_session'].max())
+            },
+            "volunteer_engagement": {
+                "total_volunteers": int(opportunities['unique_volunteers'].sum()),
+                "avg_volunteers_per_opportunity": float(opportunities['unique_volunteers'].mean())
+            },
+            "popular_opportunities": opportunities.nlargest(5, 'unique_volunteers')[['project_name', 'branch', 'category', 'unique_volunteers']].to_dict('records')
+        }
+        
+        return JSONResponse(content={"stats": stats})
+        
+    except Exception as e:
+        print(f"❌ Stats error: {e}")
+        raise HTTPException(status_code=500, detail="Stats service not available")
 
 # Main chat interface
 @app.post("/api/chat")
@@ -715,7 +1074,10 @@ async def main_interface():
         <section class=\"hero\">
           <h1>YMCA Volunteer PathFinder</h1>
           <p class=\"lead\">An AI assistant that helps you explore, understand, and navigate YMCA volunteer opportunities.</p>
-          <a class=\"cta\" href=\"/chat\">Start Chat</a>
+          <div style=\"margin-top: 16px;\">
+            <a class=\"cta\" href=\"/chat\" style=\"margin-right: 12px;\">Start Chat</a>
+            <a class=\"cta\" href=\"/marketplace\" style=\"background: #059669; border-color: #059669;\">Browse Marketplace</a>
+          </div>
         </section>
 
         <section class=\"section\">

@@ -158,8 +158,24 @@ class VolunteerDatabase:
         );
         """
         
+        # Applications table
+        applications_sql = """
+        CREATE TABLE IF NOT EXISTS opportunity_applications (
+            id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+            user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+            project_id INTEGER,
+            application_message TEXT,
+            availability JSONB,
+            status VARCHAR(20) DEFAULT 'pending', -- 'pending', 'reviewed', 'accepted', 'declined'
+            branch_notes TEXT,
+            interviewed_at TIMESTAMP WITH TIME ZONE,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+        """
+        
         # Execute table creation (Note: In production, use proper migrations)
-        tables = [users_sql, preferences_sql, conversations_sql, messages_sql, matches_sql, feedback_sql, analytics_sql]
+        tables = [users_sql, preferences_sql, conversations_sql, messages_sql, matches_sql, feedback_sql, analytics_sql, applications_sql]
         
         print("🗄️  Setting up database tables...")
         for sql in tables:
@@ -495,6 +511,102 @@ class VolunteerDatabase:
             return result.data
         except Exception as e:
             print(f"❌ Error getting popular matches: {e}")
+            return []
+    
+    # Application Management
+    async def save_application(self, user_id: str, application_data: Dict[str, Any]) -> Optional[str]:
+        """Save volunteer opportunity application"""
+        if not self._is_available():
+            logger.warning("Database not available, skipping application save")
+            return None
+            
+        try:
+            application_record = {
+                'user_id': user_id,
+                'project_id': application_data.get('project_id'),
+                'application_message': application_data.get('message', ''),
+                'availability': json.dumps(application_data.get('availability', {})),
+                'status': 'pending',
+                'created_at': datetime.now().isoformat(),
+                'updated_at': datetime.now().isoformat()
+            }
+            
+            result = self.supabase.table('opportunity_applications').insert(application_record).execute()
+            
+            if result.data and len(result.data) > 0:
+                logger.info(f"✅ Saved application for user {user_id}, project {application_data.get('project_id')}")
+                return result.data[0]['id']
+            else:
+                logger.error(f"Failed to save application: {result}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"❌ Error saving application: {e}")
+            return None
+    
+    async def get_user_applications(self, user_id: str, status: str = None) -> List[Dict[str, Any]]:
+        """Get applications for a user"""
+        try:
+            query = self.supabase.table('opportunity_applications').select('*').eq('user_id', user_id)
+            
+            if status:
+                query = query.eq('status', status)
+            
+            result = query.order('created_at', desc=True).execute()
+            
+            applications = []
+            for app in result.data:
+                if app.get('availability'):
+                    app['availability'] = json.loads(app['availability'])
+                applications.append(app)
+            
+            return applications
+        except Exception as e:
+            print(f"❌ Error getting user applications: {e}")
+            return []
+    
+    async def update_application_status(self, application_id: str, status: str, notes: str = None) -> bool:
+        """Update application status (for branch staff)"""
+        try:
+            update_data = {
+                'status': status,
+                'updated_at': datetime.now().isoformat()
+            }
+            
+            if notes:
+                update_data['branch_notes'] = notes
+            
+            result = self.supabase.table('opportunity_applications')\
+                .update(update_data)\
+                .eq('id', application_id)\
+                .execute()
+            
+            return len(result.data) > 0
+        except Exception as e:
+            print(f"❌ Error updating application status: {e}")
+            return False
+    
+    async def get_applications_by_project(self, project_id: int, status: str = None) -> List[Dict[str, Any]]:
+        """Get applications for a specific project (for branch staff)"""
+        try:
+            query = self.supabase.table('opportunity_applications')\
+                .select('*, users(first_name, last_name, email, phone)')\
+                .eq('project_id', project_id)
+            
+            if status:
+                query = query.eq('status', status)
+            
+            result = query.order('created_at', desc=True).execute()
+            
+            applications = []
+            for app in result.data:
+                if app.get('availability'):
+                    app['availability'] = json.loads(app['availability'])
+                applications.append(app)
+            
+            return applications
+        except Exception as e:
+            print(f"❌ Error getting project applications: {e}")
             return []
     
     # Data Export

@@ -518,6 +518,315 @@ class VolunteerMatchingEngine:
             score += 0.1
         
         return min(score, 1.0)
+    
+    def get_marketplace_ranking(self, user_preferences: Dict[str, Any], opportunities: pd.DataFrame, 
+                              user_history: Dict[str, Any] = None) -> List[Dict[str, Any]]:
+        """Enhanced ranking algorithm specifically for marketplace browsing"""
+        
+        if opportunities.empty:
+            return []
+        
+        ranked_opportunities = []
+        user_vector = self._create_user_vector(user_preferences)
+        
+        # Enhanced scoring factors for marketplace
+        for _, opportunity in opportunities.iterrows():
+            # Base match score
+            base_score = self._calculate_match_score(user_vector, opportunity, user_preferences)
+            
+            # Marketplace-specific enhancements
+            marketplace_score = self._calculate_marketplace_enhancements(
+                opportunity, user_preferences, user_history
+            )
+            
+            # Combine scores
+            final_score = (base_score * 0.7) + (marketplace_score * 0.3)
+            
+            # Add marketplace metadata
+            opportunity_data = {
+                'project_id': opportunity['project_id'],
+                'project_name': opportunity['project_name'],
+                'branch': opportunity['branch'],
+                'category': opportunity['category'],
+                'score': final_score,
+                'base_match_score': base_score,
+                'marketplace_boost': marketplace_score,
+                'popularity_rank': self._get_popularity_rank(opportunity),
+                'urgency_indicator': self._assess_urgency(opportunity),
+                'fit_confidence': self._calculate_fit_confidence(base_score, opportunity),
+                'estimated_satisfaction': self._predict_satisfaction(user_vector, opportunity),
+                'learning_opportunity': self._assess_learning_potential(opportunity, user_preferences),
+                'social_factors': self._analyze_social_fit(opportunity, user_preferences),
+                'reasons': self._explain_match(user_preferences, opportunity)
+            }
+            
+            ranked_opportunities.append(opportunity_data)
+        
+        # Sort by final score
+        ranked_opportunities.sort(key=lambda x: x['score'], reverse=True)
+        
+        return ranked_opportunities
+    
+    def _calculate_marketplace_enhancements(self, opportunity: pd.Series, 
+                                          user_preferences: Dict[str, Any], 
+                                          user_history: Dict[str, Any] = None) -> float:
+        """Calculate marketplace-specific scoring enhancements"""
+        enhancement_score = 0.5  # Base enhancement
+        
+        # Trending/popularity boost
+        volunteer_count = opportunity.get('unique_volunteers', 0)
+        if volunteer_count > 15:
+            enhancement_score += 0.15  # Popular opportunity boost
+        elif volunteer_count > 5:
+            enhancement_score += 0.08  # Moderately popular
+        
+        # Urgency boost (simulated - would be real-time in production)
+        if opportunity.get('category', '').lower() in ['special events', 'seasonal']:
+            enhancement_score += 0.1
+        
+        # Diversity boost - encourage trying new categories
+        if user_history and 'past_categories' in user_history:
+            past_categories = user_history['past_categories']
+            current_category = opportunity.get('category', '')
+            if current_category not in past_categories:
+                enhancement_score += 0.08  # New experience boost
+        
+        # Branch affinity boost
+        if user_history and 'preferred_branches' in user_history:
+            preferred_branches = user_history['preferred_branches']
+            current_branch = opportunity.get('branch', '')
+            if current_branch in preferred_branches:
+                enhancement_score += 0.12  # Familiar location boost
+        
+        # Time slot optimization (if available)
+        # This would integrate with real calendar data
+        if user_preferences.get('availability'):
+            enhancement_score += 0.05  # Schedule compatibility boost
+        
+        return min(enhancement_score, 1.0)
+    
+    def _get_popularity_rank(self, opportunity: pd.Series) -> str:
+        """Get popularity ranking for display"""
+        volunteer_count = opportunity.get('unique_volunteers', 0)
+        
+        if volunteer_count >= 20:
+            return 'high'
+        elif volunteer_count >= 8:
+            return 'medium'
+        elif volunteer_count >= 3:
+            return 'growing'
+        else:
+            return 'new'
+    
+    def _assess_urgency(self, opportunity: pd.Series) -> Dict[str, Any]:
+        """Assess urgency indicators for the opportunity"""
+        urgency = {
+            'level': 'normal',
+            'reason': '',
+            'deadline': None
+        }
+        
+        # Check for time-sensitive categories
+        category = opportunity.get('category', '').lower()
+        if 'event' in category or 'seasonal' in category:
+            urgency['level'] = 'high'
+            urgency['reason'] = 'Time-sensitive opportunity'
+        
+        # Check volunteer count vs capacity (simulated)
+        volunteer_count = opportunity.get('unique_volunteers', 0)
+        if volunteer_count < 3:
+            urgency['level'] = 'high' if urgency['level'] != 'high' else 'high'
+            urgency['reason'] = 'Volunteers needed urgently'
+        
+        return urgency
+    
+    def _calculate_fit_confidence(self, base_score: float, opportunity: pd.Series) -> float:
+        """Calculate confidence level in the match quality"""
+        
+        # Base confidence from match score
+        confidence = base_score
+        
+        # Boost confidence for well-established programs
+        volunteer_count = opportunity.get('unique_volunteers', 0)
+        if volunteer_count > 10:
+            confidence += 0.1
+        
+        # Boost for clear requirements and descriptions
+        if len(str(opportunity.get('required_credentials', ''))) > 20:
+            confidence += 0.05
+        
+        if len(str(opportunity.get('need', ''))) > 50:
+            confidence += 0.05
+        
+        return min(confidence, 1.0)
+    
+    def _predict_satisfaction(self, user_vector: Dict[str, float], opportunity: pd.Series) -> float:
+        """Predict user satisfaction based on opportunity characteristics"""
+        
+        satisfaction = 0.7  # Base satisfaction prediction
+        
+        # Interest alignment boost
+        if user_vector.get('interests_youth') and 'youth' in opportunity.get('category', '').lower():
+            satisfaction += 0.15
+        if user_vector.get('interests_fitness') and 'fitness' in opportunity.get('category', '').lower():
+            satisfaction += 0.15
+        
+        # Time commitment alignment
+        user_commitment = user_vector.get('time_commitment', 2)
+        opp_hours = opportunity.get('avg_hours_per_session', 2)
+        if abs(user_commitment - opp_hours) <= 1:
+            satisfaction += 0.1
+        
+        # Social environment factor
+        volunteer_count = opportunity.get('unique_volunteers', 0)
+        if 5 <= volunteer_count <= 15:  # Sweet spot for social interaction
+            satisfaction += 0.1
+        
+        return min(satisfaction, 1.0)
+    
+    def _assess_learning_potential(self, opportunity: pd.Series, user_preferences: Dict[str, Any]) -> Dict[str, Any]:
+        """Assess learning and growth potential"""
+        
+        learning_score = 0.5
+        growth_areas = []
+        
+        # Skills development potential
+        required_creds = str(opportunity.get('required_credentials', '')).lower()
+        if 'training' in required_creds or 'certification' in required_creds:
+            learning_score += 0.2
+            growth_areas.append('Professional skills')
+        
+        # Leadership opportunities
+        if 'leadership' in opportunity.get('category', '').lower():
+            learning_score += 0.15
+            growth_areas.append('Leadership experience')
+        
+        # Cross-functional experience
+        category = opportunity.get('category', '').lower()
+        if any(term in category for term in ['admin', 'event', 'program']):
+            learning_score += 0.1
+            growth_areas.append('Organizational skills')
+        
+        return {
+            'score': min(learning_score, 1.0),
+            'growth_areas': growth_areas,
+            'skill_building': len(growth_areas) > 0
+        }
+    
+    def _analyze_social_fit(self, opportunity: pd.Series, user_preferences: Dict[str, Any]) -> Dict[str, Any]:
+        """Analyze social aspects and team environment fit"""
+        
+        volunteer_count = opportunity.get('unique_volunteers', 0)
+        social_score = 0.5
+        
+        # Team size assessment
+        if volunteer_count == 0:
+            team_size = 'solo'
+            social_score += 0.1 if user_preferences.get('prefers_independent') else -0.1
+        elif volunteer_count <= 5:
+            team_size = 'small_team'
+            social_score += 0.15
+        elif volunteer_count <= 15:
+            team_size = 'medium_team' 
+            social_score += 0.2
+        else:
+            team_size = 'large_group'
+            social_score += 0.1
+        
+        # Age compatibility (if available)
+        user_age = user_preferences.get('age', 35)
+        if 'youth' in opportunity.get('category', '').lower() and user_age < 30:
+            social_score += 0.1
+        
+        return {
+            'score': min(social_score, 1.0),
+            'team_size': team_size,
+            'collaboration_level': 'high' if volunteer_count > 5 else 'moderate',
+            'mentoring_potential': volunteer_count > 10
+        }
+    
+    def get_similar_opportunities(self, opportunity_id: int, limit: int = 5) -> List[Dict[str, Any]]:
+        """Find opportunities similar to a given opportunity"""
+        
+        if self.project_features.empty:
+            return []
+        
+        # Find the target opportunity
+        target_opp = self.project_features[self.project_features['project_id'] == opportunity_id]
+        if target_opp.empty:
+            return []
+        
+        target_opp = target_opp.iloc[0]
+        similar_opportunities = []
+        
+        # Calculate similarity for all other opportunities
+        for _, opp in self.project_features.iterrows():
+            if opp['project_id'] == opportunity_id:
+                continue
+                
+            similarity_score = self._calculate_opportunity_similarity(target_opp, opp)
+            
+            similar_opportunities.append({
+                'project_id': opp['project_id'],
+                'project_name': opp['project_name'],
+                'branch': opp['branch'],
+                'category': opp['category'],
+                'similarity_score': similarity_score,
+                'similar_aspects': self._identify_similar_aspects(target_opp, opp)
+            })
+        
+        # Sort by similarity and return top results
+        similar_opportunities.sort(key=lambda x: x['similarity_score'], reverse=True)
+        return similar_opportunities[:limit]
+    
+    def _calculate_opportunity_similarity(self, opp1: pd.Series, opp2: pd.Series) -> float:
+        """Calculate similarity between two opportunities"""
+        similarity = 0.0
+        
+        # Category similarity
+        if opp1['category'] == opp2['category']:
+            similarity += 0.4
+        elif any(word in opp2['category'].lower() for word in opp1['category'].lower().split()):
+            similarity += 0.2
+        
+        # Branch similarity
+        if opp1['branch'] == opp2['branch']:
+            similarity += 0.2
+        
+        # Time commitment similarity
+        hours_diff = abs(opp1.get('avg_hours_per_session', 2) - opp2.get('avg_hours_per_session', 2))
+        time_similarity = max(0, 1 - (hours_diff / 4))
+        similarity += time_similarity * 0.2
+        
+        # Popularity similarity
+        vol1 = opp1.get('unique_volunteers', 0)
+        vol2 = opp2.get('unique_volunteers', 0)
+        pop_similarity = 1 - abs(vol1 - vol2) / max(vol1 + vol2, 1)
+        similarity += pop_similarity * 0.2
+        
+        return min(similarity, 1.0)
+    
+    def _identify_similar_aspects(self, opp1: pd.Series, opp2: pd.Series) -> List[str]:
+        """Identify what makes two opportunities similar"""
+        aspects = []
+        
+        if opp1['category'] == opp2['category']:
+            aspects.append(f"Same category: {opp1['category']}")
+        
+        if opp1['branch'] == opp2['branch']:
+            aspects.append(f"Same location: {opp1['branch']}")
+        
+        hours1 = opp1.get('avg_hours_per_session', 2)
+        hours2 = opp2.get('avg_hours_per_session', 2)
+        if abs(hours1 - hours2) <= 1:
+            aspects.append("Similar time commitment")
+        
+        vol1 = opp1.get('unique_volunteers', 0)
+        vol2 = opp2.get('unique_volunteers', 0)
+        if abs(vol1 - vol2) <= 3:
+            aspects.append("Similar team size")
+        
+        return aspects
 
 # Example usage
 if __name__ == "__main__":
