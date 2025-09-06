@@ -1,0 +1,49 @@
+# Daily Maintenance Script for YMCA Volunteer PathFinder
+# This YAML script defines a sequence of maintenance tasks
+
+name: "Daily Maintenance Tasks"
+description: "Automated daily maintenance for the volunteer system"
+version: "1.0"
+
+# Global settings for this script
+settings:
+  timeout: 1800  # 30 minutes
+  continue_on_error: false
+  log_output: true
+
+# Task sequence
+tasks:
+  - name: "Create Daily Backup"
+    type: "backup"
+    backup_type: "database"
+    output_dir: "./backups/daily"
+    description: "Create daily database backup"
+    
+  - name: "Clean Old Backups"
+    type: "cleanup"
+    target: "backups"
+    older_than_days: 7
+    description: "Remove backups older than 7 days"
+    
+  - name: "Update Analytics Cache"
+    type: "analytics"
+    action: "refresh"
+    description: "Refresh analytics data cache"
+    
+  - name: "Generate Daily Report"
+    type: "report"
+    report_type: "daily_summary"
+    output_file: "./reports/daily_report_{date}.json"
+    description: "Generate daily activity report"
+
+# Notification settings
+notifications:
+  on_success: true
+  on_failure: true
+  email_recipients:
+    - "admin@ymca.org"
+  
+# Cleanup settings
+cleanup:
+  temp_files: true
+  log_files_older_than: 30
