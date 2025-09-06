@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from typing import Dict, List, Optional, Any
 import uvicorn
 import asyncio
+import uuid
 from datetime import datetime
 import os
 import pandas as pd
@@ -20,6 +21,7 @@ from ai_assistant import VolunteerAIAssistant
 from matching_engine import VolunteerMatchingEngine
 from data_processor import VolunteerDataProcessor
 from database import VolunteerDatabase
+from webhook_service import webhook_service, WebhookEvent, WebhookConfig
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -78,6 +80,24 @@ class FeedbackData(BaseModel):
     feedback_text: str = ""
     feedback_type: str = "general"
 
+class WebhookRegistration(BaseModel):
+    webhook_id: str
+    url: str
+    event_types: List[str]
+    secret: Optional[str] = None
+    headers: Optional[Dict[str, str]] = None
+
+class VolunteerRSVP(BaseModel):
+    volunteer_id: str
+    volunteer_name: str
+    volunteer_email: Optional[str] = None
+    project_id: str
+    project_name: str
+    branch: Optional[str] = None
+    event_date: Optional[str] = None
+    rsvp_status: str = "confirmed"
+    hours_pledged: Optional[float] = None
+
 # Initialize data on startup
 @app.on_event("startup")
 async def startup_event():
@@ -113,6 +133,13 @@ async def startup_event():
     
     print("🎉 Volunteer PathFinder AI Assistant is ready!")
 
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cleanup on application shutdown"""
+    print("🛑 Shutting down Volunteer PathFinder AI Assistant...")
+    await webhook_service.cleanup()
+    print("✅ Cleanup completed")
+
 @app.post("/api/reset")
 async def reset_context() -> JSONResponse:
     """Reset assistant context and conversation cache."""
@@ -132,6 +159,150 @@ async def health_check():
         "data_loaded": volunteer_data is not None,
         "models_ready": matching_engine is not None and matching_engine.models_trained
     }
+
+# Webhook Management Endpoints
+
+@app.post("/api/webhooks/register")
+async def register_webhook(webhook_data: WebhookRegistration) -> JSONResponse:
+    """Register a new webhook for Zapier/Make integration"""
+    try:
+        config = WebhookConfig(
+            url=webhook_data.url,
+            event_types=webhook_data.event_types,
+            secret=webhook_data.secret,
+            headers=webhook_data.headers
+        )
+        
+        success = await webhook_service.register_webhook(webhook_data.webhook_id, config)
+        
+        if success:
+            return JSONResponse(content={
+                "success": True,
+                "webhook_id": webhook_data.webhook_id,
+                "message": f"Webhook registered for events: {webhook_data.event_types}"
+            })
+        else:
+            raise HTTPException(status_code=400, detail="Failed to register webhook")
+            
+    except Exception as e:
+        print(f"❌ Webhook registration error: {e}")
+        raise HTTPException(status_code=500, detail="Webhook registration failed")
+
+@app.delete("/api/webhooks/{webhook_id}")
+async def unregister_webhook(webhook_id: str) -> JSONResponse:
+    """Unregister a webhook"""
+    try:
+        success = await webhook_service.unregister_webhook(webhook_id)
+        
+        if success:
+            return JSONResponse(content={
+                "success": True,
+                "message": f"Webhook {webhook_id} unregistered"
+            })
+        else:
+            raise HTTPException(status_code=404, detail="Webhook not found")
+            
+    except Exception as e:
+        print(f"❌ Webhook unregistration error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to unregister webhook")
+
+@app.post("/api/webhooks/{webhook_id}/test")
+async def test_webhook(webhook_id: str) -> JSONResponse:
+    """Test a registered webhook"""
+    try:
+        result = await webhook_service.test_webhook(webhook_id)
+        return JSONResponse(content=result)
+        
+    except Exception as e:
+        print(f"❌ Webhook test error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to test webhook")
+
+@app.get("/api/webhooks/stats")
+async def get_webhook_stats() -> JSONResponse:
+    """Get webhook statistics"""
+    try:
+        stats = webhook_service.get_webhook_stats()
+        return JSONResponse(content=stats)
+        
+    except Exception as e:
+        print(f"❌ Webhook stats error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to get webhook stats")
+
+# Volunteer and RSVP Event Endpoints
+
+@app.post("/api/webhooks/trigger/volunteer-registered")
+async def trigger_volunteer_registered(user_data: UserProfile, background_tasks: BackgroundTasks) -> JSONResponse:
+    """Trigger webhook when a new volunteer registers"""
+    try:
+        event_data = {
+            "volunteer_id": str(uuid.uuid4()),
+            "email": user_data.email,
+            "first_name": user_data.first_name,
+            "last_name": user_data.last_name,
+            "phone": user_data.phone,
+            "age": user_data.age,
+            "city": user_data.city,
+            "state": user_data.state,
+            "is_ymca_member": user_data.is_ymca_member,
+            "member_branch": user_data.member_branch,
+            "registration_timestamp": datetime.now().isoformat()
+        }
+        
+        event = WebhookEvent(
+            event_type="volunteer.registered",
+            data=event_data,
+            timestamp=datetime.now()
+        )
+        
+        # Trigger webhooks in background
+        background_tasks.add_task(webhook_service.trigger_webhook, event)
+        
+        return JSONResponse(content={
+            "success": True,
+            "message": "Volunteer registration webhook triggered",
+            "volunteer_id": event_data["volunteer_id"]
+        })
+        
+    except Exception as e:
+        print(f"❌ Volunteer registration webhook error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to trigger volunteer registration webhook")
+
+@app.post("/api/webhooks/trigger/volunteer-rsvp")
+async def trigger_volunteer_rsvp(rsvp_data: VolunteerRSVP, background_tasks: BackgroundTasks) -> JSONResponse:
+    """Trigger webhook when a volunteer RSVPs to an event"""
+    try:
+        event_data = {
+            "rsvp_id": str(uuid.uuid4()),
+            "volunteer_id": rsvp_data.volunteer_id,
+            "volunteer_name": rsvp_data.volunteer_name,
+            "volunteer_email": rsvp_data.volunteer_email,
+            "project_id": rsvp_data.project_id,
+            "project_name": rsvp_data.project_name,
+            "branch": rsvp_data.branch,
+            "event_date": rsvp_data.event_date,
+            "rsvp_status": rsvp_data.rsvp_status,
+            "hours_pledged": rsvp_data.hours_pledged,
+            "rsvp_timestamp": datetime.now().isoformat()
+        }
+        
+        event = WebhookEvent(
+            event_type="volunteer.rsvp",
+            data=event_data,
+            timestamp=datetime.now()
+        )
+        
+        # Trigger webhooks in background
+        background_tasks.add_task(webhook_service.trigger_webhook, event)
+        
+        return JSONResponse(content={
+            "success": True,
+            "message": "Volunteer RSVP webhook triggered",
+            "rsvp_id": event_data["rsvp_id"]
+        })
+        
+    except Exception as e:
+        print(f"❌ Volunteer RSVP webhook error: {e}")
+        raise HTTPException(status_code=500, detail="Failed to trigger volunteer RSVP webhook")
 
 # Serve static files (for web interface)
 if os.path.exists("static"):
@@ -468,7 +639,7 @@ async def get_volunteer_matches(
 
 # User management
 @app.post("/api/users")
-async def create_user(user_data: UserProfile) -> JSONResponse:
+async def create_user(user_data: UserProfile, background_tasks: BackgroundTasks) -> JSONResponse:
     """Create a new user profile"""
     
     try:
@@ -481,6 +652,30 @@ async def create_user(user_data: UserProfile) -> JSONResponse:
                 {"source": "api"},
                 user['id']
             )
+            
+            # Trigger volunteer registration webhook
+            event_data = {
+                "volunteer_id": user['id'],
+                "email": user_data.email,
+                "first_name": user_data.first_name,
+                "last_name": user_data.last_name,
+                "phone": user_data.phone,
+                "age": user_data.age,
+                "city": user_data.city,
+                "state": user_data.state,
+                "is_ymca_member": user_data.is_ymca_member,
+                "member_branch": user_data.member_branch,
+                "registration_timestamp": datetime.now().isoformat()
+            }
+            
+            event = WebhookEvent(
+                event_type="volunteer.registered",
+                data=event_data,
+                timestamp=datetime.now()
+            )
+            
+            # Trigger webhooks in background
+            background_tasks.add_task(webhook_service.trigger_webhook, event)
             
             return JSONResponse(content={"user": user, "success": True})
         else:
