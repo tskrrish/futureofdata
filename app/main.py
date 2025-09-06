@@ -6,6 +6,7 @@ from typing import Dict, List, Optional
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 
@@ -117,6 +118,14 @@ def aggregate_by_volunteer(df: pd.DataFrame) -> List[VolunteerAggregate]:
 
 
 app = FastAPI(title="Volunteer Hours Milestone Tracker")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 @app.get("/health")
