@@ -1,0 +1,521 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Contact Enrichment Privacy Settings - YMCA Volunteer PathFinder</title>
+    <style>
+        :root {
+            --primary-color: #0066cc;
+            --secondary-color: #f8f9fa;
+            --border-color: #e1e5e9;
+            --text-color: #2c3e50;
+            --success-color: #28a745;
+            --warning-color: #ffc107;
+            --danger-color: #dc3545;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            line-height: 1.6;
+            color: var(--text-color);
+            background-color: #f5f5f5;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            background: white;
+            padding: 2rem;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 2rem;
+            text-align: center;
+        }
+
+        .header h1 {
+            color: var(--primary-color);
+            margin-bottom: 0.5rem;
+        }
+
+        .header p {
+            color: #666;
+            font-size: 1.1rem;
+        }
+
+        .card {
+            background: white;
+            padding: 2rem;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 2rem;
+        }
+
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: 600;
+            color: var(--text-color);
+        }
+
+        .form-control {
+            width: 100%;
+            padding: 0.75rem;
+            border: 2px solid var(--border-color);
+            border-radius: 5px;
+            font-size: 1rem;
+            transition: border-color 0.3s ease;
+        }
+
+        .form-control:focus {
+            outline: none;
+            border-color: var(--primary-color);
+        }
+
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .checkbox-group input[type="checkbox"] {
+            margin-right: 0.5rem;
+            transform: scale(1.2);
+        }
+
+        .privacy-levels {
+            border: 1px solid var(--border-color);
+            border-radius: 5px;
+            overflow: hidden;
+        }
+
+        .privacy-level {
+            padding: 1rem;
+            border-bottom: 1px solid var(--border-color);
+            cursor: pointer;
+            transition: background-color 0.3s ease;
+        }
+
+        .privacy-level:last-child {
+            border-bottom: none;
+        }
+
+        .privacy-level:hover {
+            background-color: var(--secondary-color);
+        }
+
+        .privacy-level.selected {
+            background-color: #e3f2fd;
+            border-left: 4px solid var(--primary-color);
+        }
+
+        .privacy-level input[type="radio"] {
+            margin-right: 0.5rem;
+        }
+
+        .privacy-level h4 {
+            margin-bottom: 0.25rem;
+            color: var(--text-color);
+        }
+
+        .privacy-level p {
+            color: #666;
+            font-size: 0.9rem;
+            margin: 0;
+        }
+
+        .enrichment-types {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-top: 1rem;
+        }
+
+        .enrichment-type {
+            padding: 1rem;
+            border: 2px solid var(--border-color);
+            border-radius: 5px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .enrichment-type.selected {
+            border-color: var(--primary-color);
+            background-color: #e3f2fd;
+        }
+
+        .enrichment-type input[type="checkbox"] {
+            margin-bottom: 0.5rem;
+            transform: scale(1.3);
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 0.75rem 1.5rem;
+            border: none;
+            border-radius: 5px;
+            font-size: 1rem;
+            font-weight: 600;
+            text-decoration: none;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .btn-primary {
+            background-color: var(--primary-color);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background-color: #0052a3;
+        }
+
+        .btn-secondary {
+            background-color: #6c757d;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background-color: #5a6268;
+        }
+
+        .alert {
+            padding: 1rem;
+            margin-bottom: 1rem;
+            border-radius: 5px;
+            border: 1px solid;
+        }
+
+        .alert-success {
+            background-color: #d4edda;
+            border-color: #c3e6cb;
+            color: #155724;
+        }
+
+        .alert-warning {
+            background-color: #fff3cd;
+            border-color: #ffeaa7;
+            color: #856404;
+        }
+
+        .alert-info {
+            background-color: #d1ecf1;
+            border-color: #bee5eb;
+            color: #0c5460;
+        }
+
+        .privacy-explanation {
+            background-color: #f8f9fa;
+            padding: 1.5rem;
+            border-radius: 5px;
+            margin-top: 1rem;
+        }
+
+        .privacy-explanation h5 {
+            margin-bottom: 0.5rem;
+            color: var(--text-color);
+        }
+
+        .privacy-explanation ul {
+            margin-left: 1.5rem;
+            margin-top: 0.5rem;
+        }
+
+        .privacy-explanation li {
+            margin-bottom: 0.25rem;
+            color: #666;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 2rem;
+            color: #666;
+        }
+
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Contact Enrichment Privacy Settings</h1>
+            <p>Control how your contact information is enriched while respecting your privacy preferences</p>
+        </div>
+
+        <div id="loading" class="loading">
+            <p>Loading your privacy settings...</p>
+        </div>
+
+        <div id="settings-form" class="hidden">
+            <div class="card">
+                <div class="form-group">
+                    <div class="checkbox-group">
+                        <input type="checkbox" id="enableEnrichment" />
+                        <label for="enableEnrichment">Enable Contact Enrichment</label>
+                    </div>
+                    <p style="color: #666; font-size: 0.9rem; margin-top: 0.5rem;">
+                        When enabled, we can optionally enrich your contact information with additional details like company domains and avatars.
+                    </p>
+                </div>
+
+                <div id="privacyOptions" class="form-group hidden">
+                    <label>Privacy Level</label>
+                    <div class="privacy-levels" id="privacyLevels">
+                        <!-- Privacy levels will be loaded here -->
+                    </div>
+                </div>
+
+                <div id="enrichmentTypes" class="form-group hidden">
+                    <label>Select Enrichment Types</label>
+                    <div class="enrichment-types">
+                        <div class="enrichment-type" data-type="domain">
+                            <input type="checkbox" id="typeDomain" value="domain" />
+                            <div>
+                                <h4>Domain Information</h4>
+                                <p>Company name and website from email domain</p>
+                            </div>
+                        </div>
+                        <div class="enrichment-type" data-type="avatar">
+                            <input type="checkbox" id="typeAvatar" value="avatar" />
+                            <div>
+                                <h4>Avatar Images</h4>
+                                <p>Profile pictures from Gravatar service</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="privacy-explanation">
+                    <h5>How We Protect Your Privacy</h5>
+                    <ul>
+                        <li>Enrichment is completely optional and requires your explicit consent</li>
+                        <li>We only use publicly available information from reputable sources</li>
+                        <li>You can change or disable these settings at any time</li>
+                        <li>Your email address is never shared with third-party services</li>
+                        <li>All enrichment is performed through secure, privacy-respecting APIs</li>
+                    </ul>
+                </div>
+
+                <div style="margin-top: 2rem; text-align: right;">
+                    <button type="button" class="btn btn-secondary" onclick="window.history.back()">Cancel</button>
+                    <button type="button" class="btn btn-primary" onclick="saveSettings()" style="margin-left: 1rem;">Save Settings</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="alerts"></div>
+    </div>
+
+    <script>
+        // Get user ID from URL parameters or use a default for testing
+        const urlParams = new URLSearchParams(window.location.search);
+        const userId = urlParams.get('user_id') || 'test-user-123';
+        
+        let privacyLevels = {};
+        let currentSettings = {};
+
+        // Load privacy levels and current settings
+        async function loadData() {
+            try {
+                // Load privacy levels
+                const levelsResponse = await fetch('/api/enrichment/privacy-levels');
+                const levelsData = await levelsResponse.json();
+                if (levelsData.success) {
+                    privacyLevels = levelsData.privacy_levels;
+                    renderPrivacyLevels();
+                }
+
+                // Load current settings
+                const settingsResponse = await fetch(`/api/enrichment/settings/${userId}`);
+                if (settingsResponse.ok) {
+                    const settingsData = await settingsResponse.json();
+                    if (settingsData.success) {
+                        currentSettings = settingsData;
+                        populateForm();
+                    }
+                }
+
+                document.getElementById('loading').classList.add('hidden');
+                document.getElementById('settings-form').classList.remove('hidden');
+            } catch (error) {
+                showAlert('Error loading settings: ' + error.message, 'warning');
+                document.getElementById('loading').classList.add('hidden');
+                document.getElementById('settings-form').classList.remove('hidden');
+            }
+        }
+
+        function renderPrivacyLevels() {
+            const container = document.getElementById('privacyLevels');
+            container.innerHTML = '';
+
+            Object.entries(privacyLevels).forEach(([value, info]) => {
+                const levelDiv = document.createElement('div');
+                levelDiv.className = 'privacy-level';
+                levelDiv.innerHTML = `
+                    <input type="radio" name="privacyLevel" value="${value}" id="level_${value}">
+                    <h4>${info.name}</h4>
+                    <p>${info.description}</p>
+                `;
+                
+                levelDiv.addEventListener('click', () => {
+                    document.getElementById(`level_${value}`).checked = true;
+                    updatePrivacyLevelSelection();
+                });
+
+                container.appendChild(levelDiv);
+            });
+        }
+
+        function populateForm() {
+            // Set enrichment enabled checkbox
+            document.getElementById('enableEnrichment').checked = currentSettings.enabled || false;
+            
+            // Set privacy level
+            if (currentSettings.privacy_level) {
+                const levelRadio = document.getElementById(`level_${currentSettings.privacy_level}`);
+                if (levelRadio) {
+                    levelRadio.checked = true;
+                }
+            }
+            
+            // Set enrichment types
+            if (currentSettings.allowed_types) {
+                currentSettings.allowed_types.forEach(type => {
+                    const checkbox = document.getElementById(`type${type.charAt(0).toUpperCase() + type.slice(1)}`);
+                    if (checkbox) {
+                        checkbox.checked = true;
+                        checkbox.closest('.enrichment-type').classList.add('selected');
+                    }
+                });
+            }
+            
+            updateFormVisibility();
+            updatePrivacyLevelSelection();
+        }
+
+        function updateFormVisibility() {
+            const enabled = document.getElementById('enableEnrichment').checked;
+            const privacyOptions = document.getElementById('privacyOptions');
+            const enrichmentTypes = document.getElementById('enrichmentTypes');
+            
+            if (enabled) {
+                privacyOptions.classList.remove('hidden');
+                enrichmentTypes.classList.remove('hidden');
+            } else {
+                privacyOptions.classList.add('hidden');
+                enrichmentTypes.classList.add('hidden');
+            }
+        }
+
+        function updatePrivacyLevelSelection() {
+            document.querySelectorAll('.privacy-level').forEach(level => {
+                level.classList.remove('selected');
+            });
+            
+            const selectedLevel = document.querySelector('input[name="privacyLevel"]:checked');
+            if (selectedLevel) {
+                selectedLevel.closest('.privacy-level').classList.add('selected');
+            }
+        }
+
+        async function saveSettings() {
+            try {
+                const enabled = document.getElementById('enableEnrichment').checked;
+                const privacyLevel = document.querySelector('input[name="privacyLevel"]:checked')?.value || 'none';
+                const allowedTypes = [];
+                
+                document.querySelectorAll('#enrichmentTypes input[type="checkbox"]:checked').forEach(checkbox => {
+                    allowedTypes.push(checkbox.value);
+                });
+
+                const settings = {
+                    enabled: enabled,
+                    privacy_level: privacyLevel,
+                    allowed_types: allowedTypes
+                };
+
+                const response = await fetch(`/api/enrichment/settings/${userId}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(settings)
+                });
+
+                const result = await response.json();
+                
+                if (result.success) {
+                    showAlert('Settings saved successfully!', 'success');
+                    currentSettings = { ...currentSettings, ...settings };
+                } else {
+                    showAlert('Error saving settings: ' + result.message, 'warning');
+                }
+            } catch (error) {
+                showAlert('Error saving settings: ' + error.message, 'warning');
+            }
+        }
+
+        function showAlert(message, type = 'info') {
+            const alertsContainer = document.getElementById('alerts');
+            const alert = document.createElement('div');
+            alert.className = `alert alert-${type}`;
+            alert.textContent = message;
+            
+            alertsContainer.appendChild(alert);
+            
+            // Auto-remove after 5 seconds
+            setTimeout(() => {
+                alert.remove();
+            }, 5000);
+        }
+
+        // Event listeners
+        document.getElementById('enableEnrichment').addEventListener('change', updateFormVisibility);
+
+        // Enrichment type checkboxes
+        document.querySelectorAll('.enrichment-type').forEach(typeDiv => {
+            const checkbox = typeDiv.querySelector('input[type="checkbox"]');
+            
+            typeDiv.addEventListener('click', (e) => {
+                if (e.target.type !== 'checkbox') {
+                    checkbox.checked = !checkbox.checked;
+                }
+                
+                if (checkbox.checked) {
+                    typeDiv.classList.add('selected');
+                } else {
+                    typeDiv.classList.remove('selected');
+                }
+            });
+            
+            checkbox.addEventListener('change', () => {
+                if (checkbox.checked) {
+                    typeDiv.classList.add('selected');
+                } else {
+                    typeDiv.classList.remove('selected');
+                }
+            });
+        });
+
+        // Load data on page load
+        window.addEventListener('load', loadData);
+    </script>
+</body>
+</html>
