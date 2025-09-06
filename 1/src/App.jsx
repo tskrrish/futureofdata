@@ -13,6 +13,7 @@ import { OverviewTab } from "./components/tabs/OverviewTab";
 import { BranchesTab } from "./components/tabs/BranchesTab";
 import { PeopleTab } from "./components/tabs/PeopleTab";
 import { PassportTab } from "./components/tabs/PassportTab";
+import { RetentionTab } from "./components/tabs/RetentionTab";
 
 export default function App() {
   const [raw, setRaw] = useState(SAMPLE_DATA);
@@ -31,7 +32,9 @@ export default function App() {
     memberShareByBranch,
     trendByMonth,
     leaderboard,
-    badges
+    badges,
+    cohortData,
+    cohortInsights
   } = useVolunteerData(raw, branchFilter, search);
 
   const handleFile = useFileUpload(setRaw);
@@ -79,6 +82,7 @@ export default function App() {
             ["overview", "Overview"],
             ["branches", "Branch Breakdown"],
             ["people", "People & Badges"],
+            ["retention", "Retention Analysis"],
             ["passport", "Belonging Passport"],
           ].map(([id, label]) => (
             <button
@@ -110,6 +114,10 @@ export default function App() {
 
         {tab === "people" && (
           <PeopleTab leaderboard={leaderboard} badges={badges} />
+        )}
+
+        {tab === "retention" && (
+          <RetentionTab cohortData={cohortData} cohortInsights={cohortInsights} />
         )}
 
         {tab === "passport" && <PassportTab />}

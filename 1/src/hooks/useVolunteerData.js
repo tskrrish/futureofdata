@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { toMonth } from "../utils/dateUtils";
+import { calculateCohortRetention, formatCohortData, getCohortInsights } from "../utils/cohortUtils";
 
 export function useVolunteerData(raw, branchFilter, search, monthFilter = "All") {
   const branches = useMemo(() => {
@@ -307,6 +308,19 @@ export function useVolunteerData(raw, branchFilter, search, monthFilter = "All")
     return insights;
   }, [hoursByBranch, activeVolunteersCount, memberVolunteersCount, ydeStats, totalHours, leaderboard]);
 
+  // COHORT RETENTION ANALYSIS
+  const cohortRetention = useMemo(() => {
+    return calculateCohortRetention(raw);
+  }, [raw]);
+
+  const cohortData = useMemo(() => {
+    return formatCohortData(cohortRetention);
+  }, [cohortRetention]);
+
+  const cohortInsights = useMemo(() => {
+    return getCohortInsights(cohortRetention);
+  }, [cohortRetention]);
+
   // Enhanced KPIs
   const enhancedKPIs = useMemo(() => ({
     totalProjects: new Set(filtered.map(r => `${r.project}||${r.branch}`)).size,
@@ -333,6 +347,9 @@ export function useVolunteerData(raw, branchFilter, search, monthFilter = "All")
     ydeStats,
     seniorCentersStats,
     insights,
-    enhancedKPIs
+    enhancedKPIs,
+    cohortRetention,
+    cohortData,
+    cohortInsights
   };
 }
