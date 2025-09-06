@@ -1,7 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { motion } from 'framer-motion'
 import { makeRng } from '../utils/seeded.js'
-import { getTierData, getStoryworldChipClass, MILESTONES } from '../constants.js'
+import { getTierData, getStoryworldChipClass, MILESTONES, getStreakIcon, getStreakColor } from '../constants.js'
+import StreakBadge from './StreakBadge.jsx'
 
 function hashStringToNumber(input) {
   let hash = 0
@@ -49,7 +50,7 @@ export default function Badge({ volunteer }) {
 
   return (
     <motion.div 
-      className={`fut-card fut-card-${tierData.bgPattern} ${tierData.rarity}` 
+      className={`fut-card fut-card-${tierData.bgPattern} ${tierData.rarity}`}
       role="img" 
       aria-label="Volunteer card"
       initial={{ 
@@ -135,6 +136,14 @@ export default function Badge({ volunteer }) {
               renderStamp(milestone.label, hours >= milestone.threshold)
             )}
           </div>
+
+          {/* Streak Information */}
+          {volunteer.streaks && (
+            <div className="streaks-section">
+              <div className="streaks-title">Streaks</div>
+              <StreakBadge streaks={volunteer.streaks} />
+            </div>
+          )}
         </div>
 
         {/* Right Side Story Panel */}
